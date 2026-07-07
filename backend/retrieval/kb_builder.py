@@ -1,0 +1,186 @@
+"""
+retrieval/kb_builder.py — 离线知识库构建器 (LangChain 版)
+
+使用 LangChain Chroma 向量存储构建面试题库。
+解析 .md 题库文件, 向量化后存入 ChromaDB。
+
+题库格式 (每道题用 --- 分隔):
+  <!-- id:py_001 | category:基础 | difficulty:1 | difficulty_label:初级 -->
+  ### Q: 题目文本
+  ### A: 标准答案
+  ### S: 得分点列表
+"""
+import os
+import re
+from typing import List, Dict
+
+from langchain_chroma import Chroma
+from langchain_core.documents import Document
+
+import config
+from agent.llm import get_embeddings
+
+
+def parse_questions_from_file(filepath: str) -> List[Dict]:
+    """解析单个 .md 题库文件, 提取每道题的结构化信息"""
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # 按 --- 分割, 每道题独立
+    blocks = re.split(r"\n---\n", content)
+    questions = []
+
+    for block in blocks:
+        if not block.strip():
+            continue
+
+        # 提取元信息 <!-- id:xxx | category:xxx | difficulty:x | difficulty_label:xxx -->
+        meta_match = re.search(r"<!--\s*(.*?)\s*-->", block)
+        meta = {"id": "", "category": "", "difficulty": "2", "difficulty_label": "中级"}
+        if meta_match:
+            pairs = meta_match.group(1).split("|")
+            for pair in pairs:
+                kv = pair.strip().split(":", 1)
+                if len(kv) == 2:
+                    meta[kv[0].strip()] = kv[1].strip()
+
+        # 提取 Q / A / S 字段
+        q_match = re.search(r"### Q:\s*(.*?)(?=\n###|$)", block, re.DOTALL)
+        a_match = re.search(r"### A:\s*(.*?)(?=\n###|$)", block, re.DOTALL)
+        s_match = re.search(r"### S:\s*(.*?)(?=\n###|$)", block, re.DOTALL)
+
+        if not q_match or not a_match:
+            continue
+
+        question_text = q_match.group(1).strip()
+        answer_text = a_match.group(1).strip()
+        scoring_lines = []
+        if s_match:
+            scoring_lines = [
+                line.strip("- ").strip()
+                for line in s_match.group(1).strip().split("\n")
+                if line.strip().startswith("-")
+            ]
+
+        questions.append({
+            "id": meta["id"],
+            "category": meta["category"],
+            "difficulty": int(meta["difficulty"]),
+            "difficulty_label": meta["difficulty_label"],
+            "question": question_text,
+            "answer": answer_text,
+            "scoring_points": scoring_lines,
+            "max_score": 10,
+        })
+
+    return questions
+
+
+class KnowledgeBaseBuilder:
+    """离线知识库构建器 (LangChain Chroma 版)"""
+
+    def __init__(self, data_dir=None, chroma_path=None):
+        self.data_dir = data_dir or config.DATA_DIR
+        self.chroma_path = chroma_path or config.CHROMA_DB_PATH
+        self.collection_name = config.COLLECTION_NAME
+
+    def load_all_questions(self) -> List[Dict]:
+        """遍历 data/ 下所有 .md 文件, 解析全部题目"""
+        all_questions = []
+        for filename in sorted(os.listdir(self.data_dir)):
+            if not filename.endswith(".md"):
+                continue
+            filepath = os.path.join(self.data_dir, filename)
+            role = filename.replace(".md", "")
+            questions = parse_questions_from_file(filepath)
+            for q in questions:
+                q["role"] = role
+                q["source_file"] = filename
+            all_questions.extend(questions)
+            print(f"  {filename}: 解析出 {len(questions)} 道题")
+        return all_questions
+
+    def build(self, force_recreate=True):
+        """离线建库主流程"""
+        print("=" * 60)
+        print("[Build] 知识库离线构建 (LangChain Chroma 版)")
+        print("=" * 60)
+
+        # Step 1: 解析题库
+        print("\n[1/3] 解析面试题库...")
+        questions = self.load_all_questions()
+        if not questions:
+            print("[ERROR] 没有解析到题目, 请检查 data/ 目录下的 .md 文件格式")
+            return False
+        print(f"  共解析 {len(questions)} 道题")
+
+        # Step 2: 加载 Embeddings + 创建 ChromaDB
+        print("\n[2/3] 加载 BGE 模型并创建 ChromaDB...")
+        print(f"  模型路径: {config.EMBEDDING_MODEL_PATH}")
+        os.makedirs(self.chroma_path, exist_ok=True)
+
+        embeddings = get_embeddings()
+
+        # 如果强制重建, 先删除旧集合
+        if force_recreate:
+            import chromadb
+            client = chromadb.PersistentClient(path=self.chroma_path)
+            try:
+                client.delete_collection(self.collection_name)
+                print("  已清空旧向量库 (将重建)")
+            except Exception:
+                pass
+
+        # Step 3: 构建 LangChain Document 列表并写入 Chroma
+        print("\n[3/3] 向量化并存入 ChromaDB...")
+
+        documents = []
+        ids = []
+
+        for q in questions:
+            qid = q["id"] or f"{q['role']}_{q['category']}_{len(ids)+1}"
+
+            # 检索键 = 题目文本 (不含答案, 避免答案泄漏到检索阶段)
+            doc = Document(
+                page_content=q["question"],
+                metadata={
+                    "source_file": q["source_file"],
+                    "role": q["role"],
+                    "category": q["category"],
+                    "difficulty": q["difficulty"],
+                    "difficulty_label": q["difficulty_label"],
+                    # 答案 + 得分点存在 metadata 中, 评分阶段单独取出
+                    "answer": q["answer"],
+                    "scoring_points": "||".join(q["scoring_points"]),
+                    "max_score": q["max_score"],
+                },
+            )
+            documents.append(doc)
+            ids.append(qid)
+
+        # 使用 LangChain Chroma 批量写入
+        vectorstore = Chroma.from_documents(
+            documents=documents,
+            embedding=embeddings,
+            ids=ids,
+            collection_name=self.collection_name,
+            persist_directory=self.chroma_path,
+            collection_metadata={"hnsw:space": "cosine"},
+        )
+
+        print(f"\n[OK] 知识库构建完成!")
+        print(f"  题目总数: {len(questions)}")
+        print(f"  ChromaDB: {os.path.abspath(self.chroma_path)}")
+        print(f"  可执行: python main.py chat")
+
+        # 按角色统计
+        role_counts = {}
+        for q in questions:
+            role_counts[q["role"]] = role_counts.get(q["role"], 0) + 1
+        print(f"  各角色题量: {role_counts}")
+        return True
+
+
+if __name__ == "__main__":
+    builder = KnowledgeBaseBuilder()
+    builder.build()
