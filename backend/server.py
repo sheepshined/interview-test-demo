@@ -1,38 +1,34 @@
 """
-server.py — AI 面试系统 FastAPI 后端 (LangChain 版, 流式输出)
+server.py — AI 面试系统 FastAPI 后端 (LangGraph 版, 流式输出)
+
+架构 (阶段1 重构): 面试流程由 LangGraph StateGraph 驱动 (agent/graph.py),
+  WebSocket /ws/chat 仅作"人在回路驱动器": 接收 config/answer/report 消息,
+  转为 graph 的 astream / Command(resume=...) 调用, 并把图推送的 custom event
+  转发给前端。替代原 server.py 的 if/elif 手动编排。
 
 接口:
-  POST /api/login          登录认证 (admin / 123123)
-  POST /api/config         配置面试参数
-  POST /api/upload/resume  上传简历 PDF
-  GET  /api/roles          获取所有岗位列表
+  POST /api/login              登录认证 (admin / 123123)
+  POST /api/config             配置面试参数
+  GET  /api/roles              获取所有岗位列表
   POST /api/resume/parse-text  解析粘贴的文本简历
-  WebSocket /ws/chat       实时面试对话 (流式推送)
-  GET  /                   静态前端页面
-
-WebSocket 流式协议:
-  服务端推送:
-    {"type": "stream_start", "stream_type": "question|followup|report"}
-    {"type": "stream_chunk", "content": "文本片段"}
-    {"type": "stream_end", "stream_type": "...", "full_text": "完整文本"}
-    {"type": "config_ok", ...}
-    {"type": "decision", ...}
-    {"type": "error", "content": "..."}
+  POST /api/upload/resume      上传简历 PDF
+  WebSocket /ws/chat           实时面试对话 (graph 驱动, 流式推送)
+  GET  /                       静态前端页面
 """
 import json
 import os
 import sys
-import shutil
+import uuid
 import hashlib
 from datetime import datetime
 from typing import Optional, List
 
 import uvicorn
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # 将项目根目录加入 sys.path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -40,17 +36,20 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from retrieval.retriever import HybridRetriever
-from agent.engine import InterviewEngine
 from resume.parser import parse_resume, build_resume_context
 import config
+from common import match_role, get_difficulty_label, extract_skills
+from agent.graph import build_interview_graph
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import Command
 
 # --- FastAPI 应用 ---
-app = FastAPI(title="AI Interview System (LangChain)", version="2.1.0")
+app = FastAPI(title="AI Interview System (LangGraph)", version="3.0.0")
 
 # --- CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,12 +64,64 @@ UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 
 
 def get_retriever() -> HybridRetriever:
-    """懒加载混合检索器"""
+    """懒加载混合检索器 (BM25 + 向量 + RRF)"""
     global _retriever
     if _retriever is None:
         print("[SERVER] 正在初始化混合检索器 (BM25 + 向量)...")
         _retriever = HybridRetriever()
     return _retriever
+
+
+# --- LangGraph 引擎 (懒加载) ---
+_graph = None
+_checkpointer: Optional[MemorySaver] = None
+
+
+def get_graph():
+    """获取 (懒加载) 编译后的 LangGraph 面试图, 带 MemorySaver checkpointer
+
+    首次调用时构建图 (需 retriever 就绪), 之后复用。
+    checkpointer 按 thread_id 持久化暂停点, 支持断线续接 (阶段2 换 SqliteSaver 持久化到磁盘)。
+    """
+    global _graph, _checkpointer
+    if _graph is None:
+        r = get_retriever()
+        _checkpointer = MemorySaver()
+        _graph = build_interview_graph(r).compile(checkpointer=_checkpointer)
+    return _graph
+
+
+async def run_graph_stream(ws: WebSocket, graph, input_or_command, thread_id: str):
+    """运行 graph, 转发 custom event; 并从 values stream 检测 decision 变化补发给前端
+
+    - custom stream: 节点内 get_stream_writer() 推送的 stream_start/chunk/end 等直接转发
+    - values stream: 监听 state.decision 变化, 推送 decision 消息 (resume 后首个 custom event
+      偶发丢失, 此处从状态可靠补发)
+    图在 interrupt() 处暂停时, astream 自然结束本轮; 收到下一轮 Command(resume=...) 再继续。
+    """
+    cfg = {"configurable": {"thread_id": thread_id}}
+    last_decision = None
+    try:
+        async for mode, payload in graph.astream(
+            input_or_command, cfg, stream_mode=["custom", "values"]
+        ):
+            if mode == "custom" and isinstance(payload, dict):
+                await ws.send_json(payload)
+            elif mode == "values" and isinstance(payload, dict):
+                decision = payload.get("decision")
+                if decision and decision != last_decision:
+                    last_decision = decision
+                    await ws.send_json({
+                        "type": "decision",
+                        "action": decision.get("action", "next"),
+                        "reason": decision.get("reason", ""),
+                    })
+    except Exception as e:
+        await ws.send_json({"type": "error", "content": f"流程错误: {e}"})
+
+
+# --- 进行中面试会话登记 (断线续接, 阶段2) ---
+_sessions: dict = {}
 
 
 # ============================================================
@@ -87,7 +138,7 @@ class InterviewConfig(BaseModel):
     question_count: int = 5
     difficulty: int = 2
     resume_context: str = ""
-    resume_skills: List[str] = []
+    resume_skills: List[str] = Field(default_factory=list)
 
 
 class ConfigResponse(BaseModel):
@@ -111,7 +162,7 @@ class TextResumeRequest(BaseModel):
 
 @app.post("/api/login")
 async def api_login(req: LoginRequest):
-    """简单登录认证 — admin / 123123"""
+    """登录认证 (演示用固定账号 admin/123123)"""
     if req.username == "admin" and req.password == "123123":
         token = hashlib.md5(f"{req.username}{req.password}interview".encode()).hexdigest()
         return {"success": True, "token": token, "username": req.username}
@@ -119,66 +170,39 @@ async def api_login(req: LoginRequest):
 
 
 @app.post("/api/config", response_model=ConfigResponse)
-async def api_config(cfg: InterviewConfig):
-    """配置面试参数"""
-    r = get_retriever()
-
+def api_config(cfg: InterviewConfig):
+    """配置面试参数, 返回岗位信息与题目分类"""
     role_key = cfg.role if cfg.role in config.ROLES else "general_hr"
     role_info = config.ROLES[role_key]
-
-    categories = r.get_categories(role=role_key)
-    difficulty_label = {1: "Junior", 2: "Intermediate", 3: "Senior"}.get(
-        cfg.difficulty, "Intermediate"
-    )
-
+    categories = get_retriever().get_categories(role=role_key)
+    difficulty_label = get_difficulty_label(cfg.difficulty)
     return ConfigResponse(
         success=True,
         message=f"配置成功: {role_info['title']}, {cfg.question_count}题, {difficulty_label}",
-        role_key=role_key,
-        role_title=role_info["title"],
-        question_count=cfg.question_count,
-        difficulty=cfg.difficulty,
-        difficulty_label=difficulty_label,
-        categories=categories,
+        role_key=role_key, role_title=role_info["title"],
+        question_count=cfg.question_count, difficulty=cfg.difficulty,
+        difficulty_label=difficulty_label, categories=categories,
     )
 
 
 @app.get("/api/roles")
-async def api_get_roles():
-    """获取所有可选岗位"""
-    roles = []
-    for key, info in config.ROLES.items():
-        roles.append({"key": key, "title": info["title"], "tags": info["tags"]})
+def api_get_roles():
+    """获取所有可选岗位列表"""
+    roles = [{"key": k, "title": info["title"], "tags": info["tags"]}
+             for k, info in config.ROLES.items()]
     return {"success": True, "roles": roles}
 
 
 @app.post("/api/resume/parse-text")
-async def api_parse_text_resume(req: TextResumeRequest):
-    """解析粘贴的文本简历"""
+def api_parse_text_resume(req: TextResumeRequest):
+    """解析粘贴的文本简历: 提取技能 + 推荐岗位"""
     if not req.content.strip():
         return {"success": False, "message": "简历内容不能为空"}
-
     text = req.content
-    skills = []
-    common_skills = ["Python", "Java", "JavaScript", "Vue", "React", "TypeScript",
-                     "Django", "Flask", "FastAPI", "Spring", "SQL", "MySQL",
-                     "Docker", "Git", "Linux", "HTML", "CSS", "Node.js", "Go", "Rust"]
-    for skill in common_skills:
-        if skill.lower() in text.lower():
-            skills.append(skill)
-
-    best_role = None
-    best_score = 0
-    for rk, ri in config.ROLES.items():
-        match = sum(1 for t in ri["tags"] if any(t.lower() in s.lower() for s in skills))
-        if match > best_score:
-            best_score = match
-            best_role = rk
-
+    skills = extract_skills(text)
+    best_role, best_score = match_role(skills)
     return {
-        "success": True,
-        "skills": skills,
-        "resume_context": text[:2000],
+        "success": True, "skills": skills, "resume_context": text[:2000],
         "suggested_role": best_role if best_score > 0 else None,
         "suggested_role_title": config.ROLES[best_role]["title"] if (best_role and best_score > 0) else None,
         "match_score": best_score,
@@ -186,43 +210,45 @@ async def api_parse_text_resume(req: TextResumeRequest):
 
 
 @app.post("/api/upload/resume")
-async def api_upload_resume(file: UploadFile = File(...)):
-    """上传并解析 PDF 简历"""
+def api_upload_resume(file: UploadFile = File(...)):
+    """上传并解析 PDF 简历 (parse_resume 内部调 LLM, 耗时较长, 用 def 不阻塞事件循环)"""
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         return {"success": False, "message": "仅支持 PDF 文件"}
 
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    MAX_SIZE = 10 * 1024 * 1024  # 10MB
+    contents = file.file.read()
+    if len(contents) == 0:
+        return {"success": False, "message": "文件为空，请重新选择"}
+    if len(contents) > MAX_SIZE:
+        return {"success": False, "message": f"文件过大 ({len(contents)//1024//1024}MB)，最大支持 10MB"}
 
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = f"resume_{ts}.pdf"
     save_path = os.path.join(UPLOAD_DIR, safe_name)
+    try:
+        with open(save_path, "wb") as f:
+            f.write(contents)
+    except OSError as e:
+        print(f"[ERROR] 保存文件失败: {e}")
+        return {"success": False, "message": "文件保存失败，请重试"}
 
-    with open(save_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    data = parse_resume(save_path)
+    try:
+        data = parse_resume(save_path)
+    except Exception as e:
+        print(f"[ERROR] parse_resume 抛出异常: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "message": f"简历解析异常: {type(e).__name__}", "detail": str(e)}
     if not data:
-        return {"success": False, "message": "简历解析失败，请检查文件内容"}
+        return {"success": False, "message": "简历解析失败，请检查文件内容（可能为扫描件或加密PDF）"}
 
     context = build_resume_context(data)
-
     skills = data.get("skills", [])
-    best_role = None
-    best_score = 0
-    for rk, ri in config.ROLES.items():
-        match = sum(1 for t in ri["tags"] if any(
-            t.lower() in s.lower() for s in skills))
-        if match > best_score:
-            best_score = match
-            best_role = rk
-
+    best_role, best_score = match_role(skills)
     return {
-        "success": True,
-        "filename": file.filename,
-        "char_count": data.get("char_count", 0),
-        "skills": skills[:15],
-        "name": data.get("name", ""),
-        "resume_context": context,
+        "success": True, "filename": file.filename, "char_count": data.get("char_count", 0),
+        "skills": skills[:15], "name": data.get("name", ""), "resume_context": context,
         "suggested_role": best_role if best_score > 0 else None,
         "suggested_role_title": config.ROLES[best_role]["title"] if (best_role and best_score > 0) else None,
         "match_score": best_score,
@@ -230,39 +256,88 @@ async def api_upload_resume(file: UploadFile = File(...)):
 
 
 # ============================================================
-# WebSocket 流式推送辅助函数
+# 报告管理 + 会话管理 API (阶段2)
 # ============================================================
 
-async def ws_stream_generator(ws: WebSocket, gen, stream_type: str) -> str:
-    full_text = ""
-    await ws.send_json({"type": "stream_start", "stream_type": stream_type})
+def _safe_report_id(report_id: str) -> bool:
+    """校验 report_id 防路径穿越"""
+    return bool(report_id) and "/" not in report_id and "\\" not in report_id and ".." not in report_id
 
-    try:
-        for chunk in gen:
-            full_text += chunk
-            await ws.send_json({"type": "stream_chunk", "content": chunk})
-    except Exception as e:
-        await ws.send_json({"type": "error", "content": f"生成失败: {e}"})
-    finally:
-        await ws.send_json({
-            "type": "stream_end",
-            "stream_type": stream_type,
-            "full_text": full_text,
-        })
-    return full_text
+
+@app.get("/api/reports")
+def api_list_reports():
+    """列出历史面试报告 (读 reports/*.json 元信息)"""
+    reports = []
+    if os.path.isdir(config.REPORTS_DIR):
+        for fn in sorted(os.listdir(config.REPORTS_DIR), reverse=True):
+            if not fn.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(config.REPORTS_DIR, fn), encoding="utf-8") as f:
+                    data = json.load(f)
+                reports.append({
+                    "report_id": data.get("report_id", fn[:-5]),
+                    "role_title": data.get("role_title", ""),
+                    "role_key": data.get("role_key", ""),
+                    "difficulty_label": data.get("difficulty_label", ""),
+                    "avg_score": data.get("avg_score", 0),
+                    "total_questions": data.get("total_questions", 0),
+                    "timestamp": data.get("timestamp", ""),
+                })
+            except Exception:
+                pass
+    return {"success": True, "reports": reports}
+
+
+@app.get("/api/reports/{report_id}")
+def api_get_report(report_id: str):
+    """获取某场面试报告全文 (markdown)"""
+    if not _safe_report_id(report_id):
+        return JSONResponse(status_code=400, content={"success": False, "message": "非法 report_id"})
+    rp = os.path.join(config.REPORTS_DIR, f"{report_id}.md")
+    if not os.path.isfile(rp):
+        return JSONResponse(status_code=404, content={"success": False, "message": "报告不存在"})
+    with open(rp, encoding="utf-8") as f:
+        content = f.read()
+    return {"success": True, "report_id": report_id, "content": content}
+
+
+@app.get("/api/reports/{report_id}/radar")
+def api_get_report_radar(report_id: str):
+    """获取某场面试的雷达/维度数据 (四维均值 + 分类均值 + 逐题), 供前端 ECharts 渲染"""
+    if not _safe_report_id(report_id):
+        return JSONResponse(status_code=400, content={"success": False, "message": "非法 report_id"})
+    jp = os.path.join(config.REPORTS_DIR, f"{report_id}.json")
+    if not os.path.isfile(jp):
+        return JSONResponse(status_code=404, content={"success": False, "message": "雷达数据不存在"})
+    with open(jp, encoding="utf-8") as f:
+        data = json.load(f)
+    return {"success": True, "radar": data}
+
+
+@app.get("/api/interviews")
+def api_list_interviews():
+    """列出进行中/历史的面试会话 (断线续接, 阶段2)"""
+    return {"success": True, "interviews": list(_sessions.values())}
 
 
 # ============================================================
-# WebSocket /ws/chat (流式版)
+# WebSocket /ws/chat (LangGraph 驱动)
 # ============================================================
 
 @app.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket):
-    await ws.accept()
+    """实时面试对话 — LangGraph 驱动版
 
-    engine: Optional[InterviewEngine] = None
-    configured = False
-    interview_ended = False
+    前端发 config/answer/report 消息, 后端转为 graph 的 astream / Command(resume=...):
+      config  → graph.astream(initial_state)          跑 opening + ask, 到首个 interrupt (等回答)
+      answer  → graph.astream(Command(resume=answer)) 跑评分+决策, 到下一 interrupt (追问/下一题) 或结束
+      report  → graph.astream(Command(resume="report")) 从 closing 的 interrupt 恢复, 跑 summary
+
+    图推送的 custom event (stream_start/chunk/end/decision/interview_ended) 由 run_graph_stream 转发。
+    """
+    await ws.accept()
+    thread_id = None   # 由 config 消息确定 (支持断线重连带 thread_id)
 
     try:
         while True:
@@ -275,114 +350,90 @@ async def ws_chat(ws: WebSocket):
 
             msg_type = msg.get("type", "")
 
+            # ---- config: 开启一场新面试, 或断线重连 ----
             if msg_type == "config":
+                thread_id = msg.get("thread_id") or f"iv_{uuid.uuid4().hex[:12]}"
                 role = msg.get("role", "python_dev")
-                count = int(msg.get("question_count", 5))
-                diff = int(msg.get("difficulty", 2))
-                res_ctx = msg.get("resume_context", "")
-                res_sk = msg.get("resume_skills", [])
-
                 if role not in config.ROLES:
                     role = "general_hr"
-
-                r = get_retriever()
-                engine = InterviewEngine(r)
-                result = engine.configure(
-                    role, total_count=count, difficulty=diff,
-                    resume_context=res_ctx, resume_skills=res_sk,
-                )
-                configured = True
-
-                cats = r.get_categories(role=role)
-                diff_label = {1: "Junior", 2: "Intermediate", 3: "Senior"}.get(
-                    diff, "Intermediate"
-                )
-
-                await ws.send_json({
-                    "type": "config_ok",
-                    "content": result,
-                    "role_key": role,
-                    "role_title": engine.role_info["title"],
-                    "question_count": count,
-                    "difficulty": diff,
-                    "difficulty_label": diff_label,
-                    "categories": cats,
-                })
+                count = int(msg.get("question_count", 5))
+                diff = int(msg.get("difficulty", 2))
 
                 try:
-                    await ws_stream_generator(
-                        ws, engine.generate_question_stream(), "question"
-                    )
+                    graph = get_graph()
                 except Exception as e:
-                    await ws.send_json({"type": "error", "content": f"出题失败: {e}"})
+                    await ws.send_json({"type": "error", "content": f"引擎初始化失败: {e}"})
+                    continue
 
+                r = get_retriever()
+                role_info = config.ROLES[role]
+
+                # 断线重连: 该 thread 已有进行中会话, 不重新初始化 (MemorySaver 内状态仍在)
+                existing = _sessions.get(thread_id)
+                if existing and existing.get("status") == "ongoing" and msg.get("thread_id"):
+                    await ws.send_json({
+                        "type": "config_ok", "content": "会话已恢复, 请继续作答",
+                        "role_key": existing["role_key"], "role_title": existing["role_title"],
+                        "question_count": existing["question_count"],
+                        "difficulty": existing["difficulty"],
+                        "difficulty_label": existing.get("difficulty_label", ""),
+                        "categories": r.get_categories(role=existing["role_key"]),
+                        "resumed": True,
+                    })
+                    await ws.send_json({"type": "status", "content": "已恢复到中断点, 请继续回答上一题或输入 skip 换题"})
+                    continue
+
+                # 新建会话
+                await ws.send_json({
+                    "type": "config_ok", "content": "配置完成",
+                    "role_key": role, "role_title": role_info["title"],
+                    "question_count": count, "difficulty": diff,
+                    "difficulty_label": get_difficulty_label(diff),
+                    "categories": r.get_categories(role=role),
+                })
+                _sessions[thread_id] = {
+                    "thread_id": thread_id, "role_key": role, "role_title": role_info["title"],
+                    "question_count": count, "difficulty": diff,
+                    "difficulty_label": get_difficulty_label(diff),
+                    "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "status": "ongoing",
+                }
+
+                # 构建初始 state, 跑图到首个 interrupt (opening + 第一题)
+                initial_state = {
+                    "thread_id": thread_id, "role_key": role, "difficulty": diff,
+                    "total_count": count, "resume_context": msg.get("resume_context", ""),
+                    "resume_skills": msg.get("resume_skills", []),
+                }
+                await run_graph_stream(ws, graph, initial_state, thread_id)
+
+            # ---- answer: 候选人回答 ----
             elif msg_type == "answer":
-                if not configured or engine is None:
+                if not thread_id:
                     await ws.send_json({"type": "error", "content": "请先发送 config 配置面试"})
                     continue
-
-                if interview_ended:
-                    await ws.send_json({"type": "error", "content": "面试已结束，请点击生成报告"})
-                    continue
-
                 answer = msg.get("content", "").strip()
                 if not answer:
                     await ws.send_json({"type": "error", "content": "回答不能为空"})
                     continue
-
                 if answer.lower() in ("quit", "exit", "q"):
-                    interview_ended = True
                     await ws.send_json({"type": "interview_ended", "content": "面试已结束", "can_report": True})
                     continue
+                graph = get_graph()
+                # resume 图: 跑评分+决策, 到下一 interrupt 或结束
+                await run_graph_stream(ws, graph, Command(resume=answer), thread_id)
 
-                if answer.lower() in ("下一题", "换一题", "skip"):
-                    try:
-                        await ws.send_json({"type": "status", "content": "换下一题..."})
-                        await ws_stream_generator(
-                            ws, engine.generate_question_stream(), "question"
-                        )
-                    except Exception as e:
-                        await ws.send_json({"type": "error", "content": f"出题失败: {e}"})
-                    continue
-
-                engine.receive_answer(answer)
-                engine.score_answer()
-
-                decision = engine.decide()
-                action = decision.get("action", "next")
-
-                await ws.send_json({
-                    "type": "decision",
-                    "action": action,
-                    "reason": decision.get("reason", ""),
-                })
-
-                if action == "followup":
-                    topic = decision.get("followup_topic", "")
-                    await ws_stream_generator(
-                        ws, engine.generate_followup_stream(topic), "followup"
-                    )
-
-                elif action == "end":
-                    interview_ended = True
-                    await ws.send_json({"type": "interview_ended", "content": "面试已完成", "can_report": True})
-                    continue
-
-                else:
-                    try:
-                        await ws_stream_generator(
-                            ws, engine.generate_question_stream(), "question"
-                        )
-                    except Exception as e:
-                        await ws.send_json({"type": "error", "content": f"出题失败: {e}"})
-
+            # ---- report: 生成面试报告 ----
             elif msg_type == "report":
-                if engine is None:
+                if not thread_id:
                     await ws.send_json({"type": "error", "content": "面试尚未开始"})
                     continue
-                await ws_stream_generator(
-                    ws, engine.generate_summary_stream(), "report"
-                )
+                graph = get_graph()
+                # 从 closing 的 interrupt 恢复, 跑 summary
+                await run_graph_stream(ws, graph, Command(resume="report"), thread_id)
+                # 标记会话结束
+                if thread_id in _sessions:
+                    _sessions[thread_id]["status"] = "ended"
 
             else:
                 await ws.send_json({"type": "error", "content": f"未知消息类型: {msg_type}"})
@@ -404,10 +455,12 @@ async def ws_chat(ws: WebSocket):
 @app.get("/")
 @app.get("/index.html")
 async def serve_index():
+    """首页: 返回 static/index.html (前端构建产物)"""
     index_path = os.path.join(STATIC_DIR, "index.html")
     if os.path.isfile(index_path):
         return FileResponse(index_path, media_type="text/html")
     return {"detail": "Not Found", "message": "请将前端文件放入 static/ 目录"}
+
 
 if os.path.isdir(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

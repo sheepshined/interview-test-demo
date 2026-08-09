@@ -14,11 +14,23 @@ venv/
 node_modules/
 dist/
 
+# 前端构建产物 (集成到 backend/static, 不跟踪)
+backend/static/
+
 # 向量数据库
 backend/chroma_db/
 
 # 上传文件
 backend/uploads/
+
+# 运行时面试记录与报告 (本地保留, 不提交)
+backend/agent/interview_records_*.md
+backend/reports/*
+!backend/reports/.gitkeep
+
+# 本地答辩材料与 HTML 分享包
+defense-ppt/
+.trae-html-share-packages/
 
 # 系统文件
 .DS_Store

@@ -112,7 +112,8 @@ def parse_resume(pdf_path: str) -> Optional[Dict]:
 
 
 def build_resume_context(resume_data: Dict) -> str:
-    """将简历数据转换为面试 Prompt 上下文 (严格控制在 800 字以内)"""
+    """将简历数据转换为面试 Prompt 上下文 (严格控制在 800 字以内)
+    主要控制 100<skill<200,150<exp<250,50<proj<100,50<edu<150"""
     parts = []
     budget = 800
 
@@ -129,6 +130,8 @@ def build_resume_context(resume_data: Dict) -> str:
         line = "候选人: " + " | ".join(info_parts)
         parts.append(line)
         budget -= len(line) + 2
+
+    '''主要控制 100<skill<200,150<exp<250,50<proj<100,50<edu<150'''
 
     if resume_data.get("skills") and budget > 100:
         skills_str = "、".join(resume_data["skills"][:15])
@@ -172,7 +175,7 @@ def _llm_extract(text: str) -> Optional[object]:
     from resume.llm_parser import llm_extract
     return llm_extract(text)
 
-
+# _______________________________________________________________________
 # ============================================================
 # 规则提取 (fallback)
 # ============================================================
@@ -218,39 +221,13 @@ def _extract_contact(text: str) -> Dict[str, str]:
             result["location"] = city
             break
 
-    return result
+    return result           #手机号和省份地址
 
 
 def _extract_skills(text: str) -> list:
-    """规则提取技能关键词 (fallback)"""
-    TECH_KEYWORDS = [
-        "Python", "Java", "JavaScript", "TypeScript", "Go", "Rust", "C++", "C#",
-        "SQL", "Shell", "PHP", "Ruby", "Scala", "Kotlin", "Swift",
-        "HTML", "CSS", "React", "Vue", "Vue.js", "Angular", "Next.js",
-        "Django", "DRF", "Flask", "FastAPI", "Spring", "Spring Boot",
-        "Express", "NestJS", "Gin", "Rails", "Laravel",
-        "SQLAlchemy", "Celery", "pytest", "requests", "Pydantic",
-        "MySQL", "PostgreSQL", "MongoDB", "Redis", "Elasticsearch", "Oracle",
-        "SQLite", "ClickHouse", "Neo4j",
-        "Docker", "Kubernetes", "K8s", "AWS", "Azure", "GCP",
-        "CI/CD", "Jenkins", "GitHub Actions", "Terraform", "Ansible",
-        "Nginx", "Apache", "Linux", "Helm", "Prometheus", "Grafana", "ELK",
-        "Spark", "Hadoop", "Flink", "Kafka", "RabbitMQ", "Airflow",
-        "TensorFlow", "PyTorch", "Pandas", "NumPy", "Scikit-learn",
-        "LangChain", "Transformers", "FAISS", "Chroma", "BGE",
-        "Git", "GitHub", "GitLab", "Jira", "Figma",
-        "RESTful", "gRPC", "GraphQL", "Microservices", "Docker",
-    ]
-
-    found = []
-    text_lower = text.lower()
-    for kw in TECH_KEYWORDS:
-        kw_lower = kw.lower()
-        if kw_lower in text_lower and kw not in found:
-            pattern = rf'(?<![a-z0-9#.+]){re.escape(kw_lower)}(?![a-z0-9])'
-            if re.search(pattern, text_lower):
-                found.append(kw)
-    return found
+    """规则提取技能关键词 (fallback, 委托 common.extract_skills 统一词表)"""
+    from common import extract_skills
+    return extract_skills(text)
 
 
 def _extract_name(text: str) -> str:

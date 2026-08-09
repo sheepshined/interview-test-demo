@@ -46,7 +46,7 @@ const questionCount = ref(5)
 const interviewTypes = [{value:'technical',label:'技术面试',icon:'pen-line',desc:'考察专业技能和项目经验'},{value:'hr',label:'HR面试',icon:'user',desc:'考察综合素质和沟通表达'},{value:'general',label:'综合面试',icon:'star',desc:'技术 + HR 综合考察'}]
 const countOptions = [{value:5,label:'5 题 (约10分钟)'},{value:10,label:'10 题 (约20分钟)'},{value:15,label:'15 题 (约30分钟)'}]
 onMounted(async () => { const r=await getRoles(); if(r.success){roles.value=r.roles;if(roles.value.length)selectedRole.value=roles.value[0].key} })
-function startInterview() { const role=roles.value.find(r=>r.key===selectedRole.value); sessionStorage.setItem('selectedRole',JSON.stringify({key:selectedRole.value,title:role?.title||'',resumeContext:'',resumeSkills:[]})); router.push('/interview') }
+function startInterview() { const role=roles.value.find(r=>r.key===selectedRole.value); sessionStorage.setItem('selectedRole',JSON.stringify({key:selectedRole.value,title:role?.title||'',resumeContext:'',resumeSkills:[],questionCount:questionCount.value})); router.push('/interview') }
 </script>
 <style scoped>
 .chip{padding:8px 18px;border-radius:999px;font-size:13px;cursor:pointer;border:1px solid var(--border-default);background:var(--surface);color:var(--text-secondary);transition:all 0.16s;}

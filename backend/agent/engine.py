@@ -8,8 +8,10 @@ agent/engine.py — AI 面试官引擎 (LangChain 版)
   CONFIG → ASKING → RETRIEVED → SCORED → DECIDED → (FOLLOWUP | NEXT | SUMMARY)
 """
 import os
+import re
 import time
 import random
+import logging
 from typing import List, Dict, Optional
 from enum import Enum
 
@@ -24,20 +26,26 @@ from agent.chains import (
     build_scoring_chain,
     build_followup_chain,
     build_summary_chain,
+    build_opening_chain,
+    build_closing_chain,
     get_format_instructions,
 )
 from agent.models import ScoreResult
 from agent.tools import create_tools
 from retrieval.retriever import HybridRetriever
 
+logger = logging.getLogger(__name__)
+
 
 class Phase(Enum):
     CONFIG = "config"
+    OPENING = "opening"
     ASKING = "asking"
     RETRIEVED = "retrieved"
     SCORED = "scored"
     DECIDED = "decided"
     FOLLOWUP = "followup"
+    CLOSING = "closing"
     SUMMARY = "summary"
 
 
@@ -65,6 +73,8 @@ class InterviewEngine:
         self._scoring_chain = build_scoring_chain(self.llm)
         self._followup_chain = build_followup_chain(self.llm)
         self._summary_chain = build_summary_chain(self.llm)
+        self._opening_chain = build_opening_chain(self.llm)
+        self._closing_chain = build_closing_chain(self.llm)
 
         # 面试配置
         self.role_key = ""
@@ -88,9 +98,12 @@ class InterviewEngine:
         self.last_user_answer = ""
         self.followup_count = 0
         self.is_followup_phase = False
+        self.candidate_name = ""
+        self.first_topic_hint = ""
 
         # 记录文件
         self._md_path: Optional[str] = None
+        self._report_path: Optional[str] = None
 
     # ============================================================
     # Phase 0: 配置
@@ -109,21 +122,26 @@ class InterviewEngine:
         self.role_info = config.ROLES[self.role_key]
         self.total_count = total_count
         self.difficulty = difficulty
-        self.difficulty_label = {1: "Junior", 2: "Intermediate", 3: "Senior"}.get(
+        self.difficulty_label = config.DIFFICULTY_LABELS.get(
             difficulty, "Intermediate"
         )
         self.resume_context = resume_context
         self.has_resume = bool(resume_context)
         self.resume_skills = resume_skills or []
 
+        # 从简历提取候选人姓名 (简单正则, 提取不到则留空)
+        name_match = re.search(r"姓名[:：]\s*([^\s,，。;；\n、]{2,8})", resume_context)
+        self.candidate_name = name_match.group(1).strip() if name_match else ""
+
         # 重置状态
-        self.phase = Phase.ASKING
+        self.phase = Phase.OPENING
         self.asked_ids = []
         self.asked_categories = []
         self.records = []
         self.main_question_count = 0
         self.followup_count = 0
         self.is_followup_phase = False
+        self.first_topic_hint = ""
         self.memory.clear()
 
         # 初始化 .md 记录文件
@@ -174,7 +192,14 @@ class InterviewEngine:
         return [skill for skill in self.resume_skills if _is_related(skill)]
 
     def _select_topic_for_search(self) -> str:
-        """选择搜索话题, 引入随机性避免重复"""
+        """选择搜索话题, 引入随机性避免重复
+
+        第一题优先使用开场引出的方向 (first_topic_hint),
+        保证开场白与第一题语义连贯; 后续题按简历技能/岗位 tag 随机抽样。
+        """
+        if self.main_question_count == 0 and self.first_topic_hint:
+            return self.first_topic_hint
+
         relevant_skills = self._get_filtered_resume_skills()
         if relevant_skills:
             sample_size = min(len(relevant_skills), random.randint(2, 3))
@@ -201,6 +226,46 @@ class InterviewEngine:
             if cat in all_cats:
                 return cat
         return random.choice(all_cats)
+
+    # ============================================================
+    # 辅助: 表现档位 + 上一题回顾构建
+    # ============================================================
+
+    def _band(self, score: int) -> str:
+        """将分数映射为表现档位 (用于即时反馈与追问的语气调节)"""
+        if score >= 8:
+            return "优秀"
+        if score >= 5:
+            return "合格"
+        return "待加强"
+
+    def _build_prev_context(self) -> str:
+        """构建上一题回顾文本, 注入出题 prompt 用于生成承上启下
+
+        第一题时返回空提示; 后续题返回上一题题目、候选人回答要点、
+        表现档位、可衔接方向, 让 LLM 据此生成自然的过渡语。
+        """
+        if not self.records:
+            return "（这是第一题, 无需衔接上一题）"
+
+        last = self.records[-1]
+        prev_question = last.get("question", "")[:120]
+        prev_band = self._band(last.get("score", 0))
+        prev_answer = last.get("user_answer", "")
+        # 回答要点: 取命中的得分点, 没有则截取回答前 80 字
+        hit = last.get("hit_points", [])
+        prev_summary = "、".join(hit[:3]) if hit else prev_answer[:80]
+        # 可衔接方向: 取遗漏点或题目关键词
+        missed = last.get("missed_points", [])
+        direction = missed[0] if missed else prev_question[:40]
+
+        return (
+            f"## 上一题回顾（用于生成承上启下）\n"
+            f"上一题: {prev_question}\n"
+            f"候选人回答要点: {prev_summary}\n"
+            f"表现档位: {prev_band}\n"
+            f"可衔接方向: {direction}"
+        )
 
     # ============================================================
     # Phase 1: 出题 (使用 LCEL question_chain, 支持流式)
@@ -276,6 +341,9 @@ class InterviewEngine:
         else:
             resume_section = "(无简历信息, 直接出题)"
 
+        # 构建上一题回顾 (用于生成承上启下衔接语)
+        prev_context = self._build_prev_context()
+
         return {
             "role_title": self.role_info["title"],
             "difficulty_label": self.difficulty_label,
@@ -283,6 +351,7 @@ class InterviewEngine:
             "total_count": self.total_count,
             "question_text": chosen["question"],
             "resume_section": resume_section,
+            "prev_context": prev_context,
             "history": self.memory.get_history_for_chain(),
         }
 
@@ -310,6 +379,90 @@ class InterviewEngine:
     def generate_question(self) -> str:
         """非流式生成面试题 (内部调用流式方法并拼接)"""
         return "".join(self.generate_question_stream())
+
+    # ============================================================
+    # Phase 0b: 开场 (面试官自我介绍 + 引出第一个话题方向)
+    # ============================================================
+
+    def generate_opening_stream(self):
+        """流式生成开场白 (generator, 逐块 yield 文本)
+
+        开场前先选定第一个话题方向并存入 first_topic_hint,
+        使后续第一题检索与之语义连贯 (开场说"先聊X", 第一题就出X相关)。
+        """
+        self.phase = Phase.OPENING
+
+        # 选定第一个话题方向 (优先简历技能, 否则岗位 tag)
+        relevant_skills = self._get_filtered_resume_skills()
+        if relevant_skills:
+            self.first_topic_hint = random.choice(relevant_skills)
+        else:
+            tags = self.role_info.get("tags", [])
+            self.first_topic_hint = random.choice(tags) if tags else self.role_info.get("title", "")
+
+        input_dict = {
+            "role_title": self.role_info["title"],
+            "difficulty_label": self.difficulty_label,
+            "total_count": self.total_count,
+            "candidate_name": self.candidate_name or "你",
+            "first_direction": self.first_topic_hint,
+        }
+
+        full_text = ""
+        try:
+            for chunk in self._opening_chain.stream(input_dict):
+                full_text += chunk
+                yield chunk
+            self.memory.add_ai_message(f"[开场] {full_text.strip()}")
+        except Exception as e:
+            yield f"\n[System] 开场生成失败: {e}"
+
+    # ============================================================
+    # Phase 6b: 收尾 (面试结束时的礼貌结束语)
+    # ============================================================
+
+    def generate_closing_stream(self):
+        """流式生成收尾语 (generator, 逐块 yield 文本)
+
+        收尾语自带对最后一题的陈述性反馈, 再总结并感谢。
+        脚本式: 面试官单方面收尾, 候选人无需回应。
+        """
+        self.phase = Phase.CLOSING
+
+        # 提取已讨论的主要话题 (主题, 不含追问)
+        topics = []
+        for r in self.records:
+            if not r.get("is_followup"):
+                q = r.get("question", "")[:40]
+                if q:
+                    topics.append(f"- {q}")
+        covered = "\n".join(topics) if topics else "（无话题记录）"
+
+        # 最后一题反馈信息 (收尾自带反馈, 取代独立 reaction)
+        last = self.records[-1] if self.records else {}
+        last_question = last.get("question", "")[:120]
+        last_band = self._band(last.get("score", 0))
+        last_hit = "、".join(last.get("hit_points", [])) if last.get("hit_points") else "无"
+        last_missed = "、".join(last.get("missed_points", [])) if last.get("missed_points") else "无"
+
+        input_dict = {
+            "role_title": self.role_info["title"],
+            "total_count": self.total_count,
+            "covered_topics": covered,
+            "last_question": last_question,
+            "last_band": last_band,
+            "last_hit": last_hit,
+            "last_missed": last_missed,
+        }
+
+        full_text = ""
+        try:
+            for chunk in self._closing_chain.stream(input_dict):
+                full_text += chunk
+                yield chunk
+            self.memory.add_ai_message(f"[收尾] {full_text.strip()}")
+        except Exception as e:
+            yield f"\n[System] 收尾生成失败: {e}"
 
     # ============================================================
     # Phase 2-3: 接收回答 + 检索标准答案
@@ -434,8 +587,8 @@ class InterviewEngine:
                     f"**遗漏得分点**: {', '.join(record['missed_points']) if record['missed_points'] else '无'}\n\n"
                     f"**AI点评**: {record.get('feedback', '')}\n\n---\n\n"
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("追加面试记录失败: %s", e)
 
     # ============================================================
     # Phase 5: 决策
@@ -470,7 +623,11 @@ class InterviewEngine:
     # ============================================================
 
     def _prepare_followup(self, missed_topic: str) -> Optional[Dict]:
-        """追问前的准备工作: 检索 + 构建prompt参数"""
+        """追问前的准备工作: 检索 + 构建prompt参数
+
+        方案C: 注入候选人回答/命中点/档位, 让追问 prompt 自带即时反馈口吻,
+        避免追问场景下"先播反馈再追问"的冗余。
+        """
         self.is_followup_phase = True
 
         # 检索相关知识 (强制 role 过滤)
@@ -491,8 +648,13 @@ class InterviewEngine:
         knowledge_text = "\n---\n".join(klist) if klist else "无参考知识"
         current_q = self.current_answer_data["question"] if self.current_answer_data else ""
 
+        # 从上一题记录提取反馈所需信息 (方案C: 追问自带反馈)
+        last = self.records[-1] if self.records else {}
         return {
             "current_question": current_q[:100],
+            "candidate_answer": last.get("user_answer", "")[:600],
+            "band": self._band(last.get("score", 0)),
+            "hit_points": "、".join(last.get("hit_points", [])) if last.get("hit_points") else "无",
             "missed_topic": missed_topic,
             "reference_knowledge": knowledge_text,
             "history": self.memory.get_history_for_chain(),
@@ -687,14 +849,18 @@ class InterviewEngine:
         )
         yield footer
 
-        # 4. 保存完整报告到文件
+        # 4. 保存完整报告到文件 (时间戳命名, 避免并发覆盖)
         full_report = structured_text + "\n\n" + ai_header + ai_text + footer
         try:
-            rp = os.path.join(config.REPORTS_DIR, "interview_report.md")
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            role_tag = self.role_key or "interview"
+            rp = os.path.join(config.REPORTS_DIR, f"interview_report_{ts}_{role_tag}.md")
             with open(rp, "w", encoding="utf-8") as f:
                 f.write(full_report)
-        except Exception:
-            pass
+            self._report_path = rp
+            logger.info("面试报告已保存: %s", rp)
+        except Exception as e:
+            logger.warning("保存面试报告失败: %s", e)
 
     def generate_summary(self) -> str:
         """非流式生成总结报告"""

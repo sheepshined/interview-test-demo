@@ -4,8 +4,7 @@ agent/models.py — Pydantic 数据模型
 定义结构化输出模型, 用于 LangChain PydanticOutputParser
 确保 LLM 评分结果可被可靠解析。
 """
-from enum import Enum
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel, Field
 
 
@@ -55,30 +54,4 @@ class ScoreResult(BaseModel):
             "feedback": self.feedback,
             "is_correct": self.is_correct,
         }
-
-
-class InterviewAction(str, Enum):
-    """面试决策动作"""
-    NEXT = "next"
-    FOLLOWUP = "followup"
-    END = "end"
-
-
-class DecisionResult(BaseModel):
-    """面试决策结果"""
-    action: InterviewAction = Field(description="下一步动作")
-    reason: str = Field(default="", description="决策理由")
-    followup_topic: Optional[str] = Field(
-        default=None, description="追问话题 (仅 action=followup 时有效)"
-    )
-
-
-class QuestionCandidate(BaseModel):
-    """候选题目"""
-    id: str = Field(description="题目ID")
-    question: str = Field(description="题目文本")
-    category: str = Field(default="", description="分类")
-    difficulty: int = Field(default=2, description="难度 1-3")
-    score: float = Field(default=0.0, description="检索相似度分数")
-
 

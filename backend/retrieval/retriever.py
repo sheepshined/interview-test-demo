@@ -9,7 +9,7 @@ retrieval/retriever.py — 混合检索器 (LangChain 版)
   - langchain_community.retrievers.BM25Retriever → 关键词检索
   - RRF 融合算法                      → 双路结果合并
 
-接口兼容原有 InterviewRetriever, 保持业务逻辑不变。
+接口兼容 InterviewRetriever, 保持业务逻辑不变。
 """
 import os
 import re
@@ -22,7 +22,7 @@ from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 
 import config
-from agent.llm import get_embeddings
+from retrieval.embeddings import get_embeddings
 
 
 def _jieba_tokenize(text: str) -> List[str]:
@@ -54,6 +54,8 @@ class HybridRetriever:
 
         # BM25 检索器缓存 (按 role 缓存)
         self._bm25_cache: Dict[str, BM25Retriever] = {}
+        # 标准答案缓存 (按 question_id, 题库不变则命中, 阶段3 提速)
+        self._answer_cache: Dict[str, Dict] = {}
 
         print("[OK] 检索器就绪 (LangChain Hybrid)")
 
@@ -266,7 +268,11 @@ class HybridRetriever:
         return merged
 
     def get_answer(self, question_id: str) -> Optional[Dict]:
-        """评分阶段: 按题号精确检索标准答案 + 得分点"""
+        """评分阶段: 按题号精确检索标准答案 + 得分点 (带缓存, 题库不变则命中)"""
+        # 缓存命中 (阶段3 提速: 同一题反复检索标准答案走内存)
+        if question_id in self._answer_cache:
+            return self._answer_cache[question_id]
+
         results = self.vectorstore._collection.get(
             ids=[question_id],
             include=["documents", "metadatas"],
@@ -280,7 +286,7 @@ class HybridRetriever:
             scoring_points_raw.split("||") if scoring_points_raw else []
         )
 
-        return {
+        result = {
             "id": results["ids"][0],
             "question": results["documents"][0],
             "standard_answer": meta.get("answer", ""),
@@ -289,6 +295,8 @@ class HybridRetriever:
             "category": meta.get("category", ""),
             "difficulty": meta.get("difficulty", 2),
         }
+        self._answer_cache[question_id] = result
+        return result
 
     def get_categories(self, role: str = None) -> List[str]:
         """获取某岗位的所有分类"""

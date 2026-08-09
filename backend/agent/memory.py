@@ -9,6 +9,7 @@ agent/memory.py — 面试对话记忆管理
   2. 超过阈值时自动压缩旧消息为摘要
   3. 提供 history 参数供 LCEL Chain 使用
 """
+import logging
 from typing import List, Dict, Optional
 
 from langchain_core.messages import (
@@ -21,6 +22,8 @@ from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.language_models import BaseChatModel
 
 import config
+
+logger = logging.getLogger(__name__)
 
 
 class InterviewMemory:
@@ -126,6 +129,7 @@ class InterviewMemory:
 
         except Exception as e:
             # 压缩失败时, 直接截断保留最近消息
+            logger.warning("对话摘要压缩失败, 截断保留最近消息: %s", e)
             self.history = InMemoryChatMessageHistory()
             for m in recent_msgs:
                 self.history.add_message(m)

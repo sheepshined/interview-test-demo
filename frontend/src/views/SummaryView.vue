@@ -12,8 +12,12 @@
           <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">回答题数</div>
         </div>
         <div style="text-align:center;min-width:80px;">
-          <div style="font-size:24px;font-weight:700;color:var(--brand-900);font-family:var(--font-mono);">{{ totalCount }}</div>
+          <div style="font-size:24px;font-weight:700;color:var(--brand-900);font-family:var(--font-mono);">{{ radar ? radar.total_questions : totalCount }}</div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">总题数</div>
+        </div>
+        <div style="text-align:center;min-width:80px;">
+          <div style="font-size:24px;font-weight:700;color:var(--brand-900);font-family:var(--font-mono);">{{ radar ? radar.avg_score : '-' }}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">平均分</div>
         </div>
         <div style="text-align:center;min-width:80px;">
           <div style="font-size:24px;font-weight:700;color:var(--brand-900);font-family:var(--font-mono);">{{ elapsedTime }}</div>
@@ -22,6 +26,36 @@
         <div style="text-align:center;min-width:80px;">
           <div style="font-size:14px;font-weight:600;color:var(--text-primary);padding-top:6px;">{{ roleTitle }}</div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">面试岗位</div>
+        </div>
+      </div>
+
+      <!-- 雷达图 (阶段2 新增) -->
+      <div v-if="radar" class="ds-card" style="padding:16px;margin-bottom:24px;">
+        <RadarChart :radar="radar" />
+      </div>
+
+      <!-- 分类得分 (阶段2 新增) -->
+      <div v-if="radar && radar.categories && radar.categories.length" class="ds-card" style="padding:20px;margin-bottom:24px;">
+        <h3 style="font-size:15px;font-weight:600;margin:0 0 12px;color:var(--text-primary);">分类得分</h3>
+        <div v-for="cat in radar.categories" :key="cat.category" style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+          <span style="font-size:13px;color:var(--text-secondary);min-width:120px;">{{ cat.category }}</span>
+          <div style="flex:1;height:8px;background:var(--bg-secondary,#f4f4f5);border-radius:4px;overflow:hidden;">
+            <div :style="{width:(cat.avg_score*10)+'%',height:'100%',background:'var(--brand-600)',borderRadius:'4px'}"></div>
+          </div>
+          <span style="font-size:13px;font-weight:600;color:var(--brand-900);font-family:var(--font-mono);min-width:60px;">{{ cat.avg_score }}/10</span>
+          <span style="font-size:12px;color:var(--text-muted);min-width:36px;">{{ cat.count }}题</span>
+        </div>
+      </div>
+
+      <!-- 强弱项 (阶段2 新增) -->
+      <div v-if="radar && (radar.strengths.length || radar.weaknesses.length)" class="ds-card" style="padding:20px;margin-bottom:24px;display:flex;gap:24px;flex-wrap:wrap;">
+        <div v-if="radar.strengths.length" style="flex:1;min-width:200px;">
+          <div style="font-size:13px;font-weight:600;color:var(--success,#16a34a);margin-bottom:8px;">✓ 优势项</div>
+          <div v-for="s in radar.strengths" :key="s" style="font-size:13px;color:var(--text-secondary);margin-bottom:4px;">{{ s }}</div>
+        </div>
+        <div v-if="radar.weaknesses.length" style="flex:1;min-width:200px;">
+          <div style="font-size:13px;font-weight:600;color:var(--error,#dc2626);margin-bottom:8px;">△ 待加强</div>
+          <div v-for="w in radar.weaknesses" :key="w" style="font-size:13px;color:var(--text-secondary);margin-bottom:4px;">{{ w }}</div>
         </div>
       </div>
 
@@ -49,27 +83,55 @@
   </div>
 </template>
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import TopNav from '../components/TopNav.vue'
-const roleTitle = ref(sessionStorage.getItem('roleTitle')||'模拟面试')
-const rawReport = ref(sessionStorage.getItem('reportData')||'')
-const answeredCount = ref(sessionStorage.getItem('answeredCount')||'0')
-const totalCount = ref(sessionStorage.getItem('totalCount')||'0')
-const elapsedTime = ref(sessionStorage.getItem('elapsedTime')||'00:00')
+import RadarChart from '../components/RadarChart.vue'
+import { getReports, getReport, getReportRadar } from '../api'
+
+const roleTitle = ref(sessionStorage.getItem('roleTitle') || '模拟面试')
+const rawReport = ref(sessionStorage.getItem('reportData') || '')
+const answeredCount = ref(sessionStorage.getItem('answeredCount') || '0')
+const totalCount = ref(sessionStorage.getItem('totalCount') || '0')
+const elapsedTime = ref(sessionStorage.getItem('elapsedTime') || '00:00')
+const radar = ref(null)
+
+onMounted(async () => {
+  try {
+    const res = await getReports()
+    if (res.success && res.reports && res.reports.length) {
+      const latest = res.reports[0]  // 最新报告
+      // sessionStorage 无报告内容时, 从 API 取
+      if (!rawReport.value) {
+        const r = await getReport(latest.report_id)
+        if (r.success) rawReport.value = r.content
+      }
+      // 取雷达/维度数据
+      const rd = await getReportRadar(latest.report_id)
+      if (rd.success && rd.radar) {
+        radar.value = rd.radar
+        if (rd.radar.role_title) roleTitle.value = rd.radar.role_title
+      }
+    }
+  } catch (e) {
+    console.warn('加载历史报告失败', e)
+  }
+})
+
 const reportLines = computed(() => {
-  if(!rawReport.value)return[]
-  return rawReport.value.split('\n').map(l=>{
-    const t=l.trim()
-    if(!t)return{text:'',tag:'br'}
-    if(t.startsWith('## '))return{text:t.replace('## ',''),tag:'h2'}
-    if(t.startsWith('# '))return{text:t.replace('# ',''),tag:'h2'}
-    if(t.startsWith('### '))return{text:t.replace('### ',''),tag:'h3'}
-    if(t.startsWith('---'))return{text:'',tag:'hr'}
-    if(t.startsWith('- '))return{text:t.replace('- ',''),tag:'li'}
-    return{text:t,tag:'p'}
+  if (!rawReport.value) return []
+  return rawReport.value.split('\n').map(l => {
+    const t = l.trim()
+    if (!t) return { text: '', tag: 'br' }
+    if (t.startsWith('## ')) return { text: t.replace('## ', ''), tag: 'h2' }
+    if (t.startsWith('# ')) return { text: t.replace('# ', ''), tag: 'h2' }
+    if (t.startsWith('### ')) return { text: t.replace('### ', ''), tag: 'h3' }
+    if (t.startsWith('---')) return { text: '', tag: 'hr' }
+    if (t.startsWith('- ')) return { text: t.replace('- ', ''), tag: 'li' }
+    return { text: t, tag: 'p' }
   })
 })
-function copyReport(){
+
+function copyReport() {
   navigator.clipboard.writeText(rawReport.value)
   alert('报告已复制到剪贴板')
 }

@@ -9,19 +9,16 @@ resume/llm_parser.py — LLM 简历提取 (主路径)
   - build_resume_extract_chain(llm)              Chain 构建器
   - get_resume_format_instructions() -> str      格式指令
 """
-import json
-import re
 from typing import Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser, PydanticOutputParser
 
+from common import extract_json_object
 from resume.models import ResumeInfo
 
 
-# ============================================================
-# Prompt 模板 (从 agent/prompts.py 迁移)
 # ============================================================
 
 _RESUME_SYSTEM = """你是简历解析助手。从简历文本中提取关键信息, 输出精简的结构化结果。
@@ -75,35 +72,16 @@ def get_resume_format_instructions() -> str:
 def parse_resume_info(text: str) -> ResumeInfo:
     """解析 LLM 输出为 ResumeInfo, 带容错
 
-    策略: 剥离代码块 → 直接解析 → 正则提取 → 返回空对象
+    委托 common.extract_json_object 完成 JSON 提取
+    (剥离代码块 → 直接解析 → 正则 → 平衡花括号)。
     """
     if not text:
         return ResumeInfo()
 
-    cleaned = text.strip()
-
-    # 剥离 markdown 代码块
-    code_block = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL)
-    if code_block:
-        cleaned = code_block.group(1).strip()
-
-    # 尝试直接解析
-    try:
-        data = json.loads(cleaned)
-        return _dict_to_resume_info(data)
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    # 正则提取最外层花括号
-    try:
-        match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", cleaned, re.DOTALL)
-        if match:
-            data = json.loads(match.group(0))
-            return _dict_to_resume_info(data)
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    return ResumeInfo()
+    data = extract_json_object(text)
+    if data is None:
+        return ResumeInfo()
+    return _dict_to_resume_info(data)
 
 
 def _dict_to_resume_info(data: dict) -> ResumeInfo:
@@ -129,12 +107,13 @@ def llm_extract(text: str) -> Optional[ResumeInfo]:
         text: PDF 提取的原始文本 (截断到 4000 字)
 
     Returns:
-        ResumeInfo 对象, LLM 不可用时返回 None
+        ResumeInfo 对象, LLM 不可用时返回 None (由调用方回退规则提取)
     """
     try:
         from agent.llm import get_llm
 
-        llm = get_llm(temperature=0, max_tokens=2000)
+        # 简历解析设 30s 超时上限, 避免上传接口长时间卡住
+        llm = get_llm(temperature=0, max_tokens=2000, timeout=30)
         chain = build_resume_extract_chain(llm)
         format_instructions = get_resume_format_instructions()
 
@@ -144,5 +123,5 @@ def llm_extract(text: str) -> Optional[ResumeInfo]:
         })
         return result
     except Exception as e:
-        print(f"[WARN] LLM 简历解析失败: {e}")
+        print(f"[WARN] LLM 简历解析失败 (将回退规则提取): {e}")
         return None

@@ -25,7 +25,7 @@ export function useWebSocket() {
         if (last && last.type === 'stream_start') { last.content = currentStreamText; last.full = currentStreamText }
       } else if (data.type === 'stream_end') {
         const last = messages.value[messages.value.length - 1]
-        if (last) { last.type = streamType === 'report' ? 'report' : (streamType === 'followup' ? 'followup' : 'question'); last.full = data.full_text }
+        if (last) { last.type = streamType; last.full = data.full_text }
         streamType = ''; currentStreamText = ''
       } else if (data.type === 'config_ok') { messages.value.push({ type: 'config_ok', data }) }
       else if (data.type === 'decision') { messages.value.push({ type: 'decision', data }) }

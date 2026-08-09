@@ -148,12 +148,8 @@ def cmd_chat():
 
             # 自动匹配岗位
             print("\n[匹配] 正在根据简历技能匹配岗位...")
-            role_scores = []
-            for rk, ri in config.ROLES.items():
-                match = sum(1 for t in ri["tags"] if any(
-                    t.lower() in s.lower() for s in resume_skills))
-                role_scores.append((rk, match))
-            role_scores.sort(key=lambda x: x[1], reverse=True)
+            from common import score_roles
+            role_scores = score_roles(resume_skills)
 
             print("  匹配结果:")
             for i, (rk, score) in enumerate(role_scores):
@@ -198,7 +194,7 @@ def cmd_chat():
         print()
 
         try:
-            choice = input("请输入编号 (1-5): ").strip()
+            choice = input(f"请输入编号 (1-{len(role_keys)}): ").strip()
             idx = int(choice) - 1
             if idx < 0 or idx >= len(role_keys):
                 idx = 0

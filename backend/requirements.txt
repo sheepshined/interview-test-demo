@@ -6,6 +6,10 @@ langchain-openai>=0.2.0
 langchain-chroma>=0.1.2
 langchain-huggingface>=0.1.0
 
+# ===== LangGraph (面试流程状态图编排, 阶段1 引入) =====
+langgraph>=0.2.0
+langgraph-checkpoint-sqlite>=2.0.0
+
 # ===== Vector Store & Embeddings =====
 chromadb>=0.5.0
 sentence-transformers>=3.0.0

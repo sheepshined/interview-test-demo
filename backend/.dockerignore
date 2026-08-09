@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+venv/
+.git/
+.gitignore
+chroma_db/
+uploads/
+interview_records_*.md
+Dockerfile
+.dockerignore
+.idea/
+.vscode/
+*.log

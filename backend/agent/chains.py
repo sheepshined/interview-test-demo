@@ -13,20 +13,19 @@ LCEL 优势:
   - 原生支持流式输出、异步、重试
   - 可观测性 (LangSmith 追踪)
 """
-import json
 import re
-from typing import Dict, List, Optional
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.messages import BaseMessage
-from langchain_core.runnables import RunnablePassthrough
 
+from common import extract_json_object
 from agent.prompts import (
     question_prompt,
     scorer_prompt,
     followup_prompt,
     summary_prompt,
+    opening_prompt,
+    closing_prompt,
 )
 from agent.models import ScoreResult
 
@@ -52,38 +51,12 @@ class RobustScoreParser:
         if not text:
             return self._default_result("LLM 返回空内容")
 
-        # Step 1: 剥离 markdown 代码块
-        cleaned = text.strip()
-        code_block = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL)
-        if code_block:
-            cleaned = code_block.group(1).strip()
-
-        # Step 2: 尝试直接解析
-        try:
-            data = json.loads(cleaned)
+        # Step 1-4: 公共 JSON 容错提取 (剥离代码块 → 直接解析 → 正则 → 平衡花括号)
+        data = extract_json_object(text)
+        if data is not None:
             return self._dict_to_result(data)
-        except (json.JSONDecodeError, TypeError):
-            pass
 
-        # Step 3: 正则提取最外层花括号
-        try:
-            match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", cleaned, re.DOTALL)
-            if match:
-                data = json.loads(match.group(0))
-                return self._dict_to_result(data)
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        # Step 4: 平衡花括号匹配
-        json_str = self._balanced_json_extract(cleaned)
-        if json_str:
-            try:
-                data = json.loads(json_str)
-                return self._dict_to_result(data)
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        # Step 5: 从文本中提取分数
+        # Step 5: 从文本中提取分数 (兜底)
         fallback_score = self._extract_score_from_text(text)
         if fallback_score > 0:
             return ScoreResult(
@@ -142,36 +115,6 @@ class RobustScoreParser:
         )
 
     @staticmethod
-    def _balanced_json_extract(text: str) -> Optional[str]:
-        """平衡花括号匹配"""
-        start = text.find("{")
-        if start == -1:
-            return None
-        depth = 0
-        in_string = False
-        escape = False
-        for i in range(start, len(text)):
-            ch = text[i]
-            if escape:
-                escape = False
-                continue
-            if ch == "\\":
-                escape = True
-                continue
-            if ch == '"':
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[start : i + 1]
-        return None
-
-    @staticmethod
     def _extract_score_from_text(text: str) -> int:
         """从文本中提取分数"""
         patterns = [
@@ -209,20 +152,13 @@ def build_question_chain(llm: BaseChatModel):
 def build_scoring_chain(llm: BaseChatModel):
     """构建评分 Chain
 
-    Chain: scorer_prompt | llm | RobustScoreParser
+    Chain: scorer_prompt | llm | StrOutputParser | RobustScoreParser
 
     输入参数:
         question, standard_answer, scoring_points, candidate_answer,
         format_instructions
     """
-    from langchain_core.output_parsers import PydanticOutputParser
-
-    pydantic_parser = PydanticOutputParser(pydantic_object=ScoreResult)
     robust_parser = RobustScoreParser()
-
-    # 使用自定义 RobustScoreParser 替代 PydanticOutputParser
-    # 但保留 format_instructions 用于 prompt
-    chain = scorer_prompt | llm | StrOutputParser()
 
     def parse_score(text: str) -> ScoreResult:
         return robust_parser.parse(text)
@@ -259,3 +195,29 @@ def get_format_instructions() -> str:
     from langchain_core.output_parsers import PydanticOutputParser
     parser = PydanticOutputParser(pydantic_object=ScoreResult)
     return parser.get_format_instructions()
+
+
+# ============================================================
+#  Chain: 开场 / 收尾
+# ============================================================
+
+def build_opening_chain(llm: BaseChatModel):
+    """构建开场 Chain    开场白
+
+    Chain: opening_prompt | llm | StrOutputParser
+
+    输入参数:
+        role_title, difficulty_label, total_count, candidate_name, first_direction
+    """
+    return opening_prompt | llm | StrOutputParser()
+
+
+def build_closing_chain(llm: BaseChatModel):
+    """构建收尾 Chain    收尾白 即总结最后一个问题
+
+    Chain: closing_prompt | llm | StrOutputParser
+
+    输入参数:
+        role_title, total_count, covered_topics
+    """
+    return closing_prompt | llm | StrOutputParser()

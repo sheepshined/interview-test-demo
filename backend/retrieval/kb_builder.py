@@ -12,13 +12,16 @@ retrieval/kb_builder.py — 离线知识库构建器 (LangChain 版)
 """
 import os
 import re
+import logging
 from typing import List, Dict
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
 import config
-from agent.llm import get_embeddings
+from retrieval.embeddings import get_embeddings
+
+logger = logging.getLogger(__name__)
 
 
 def parse_questions_from_file(filepath: str) -> List[Dict]:
@@ -37,10 +40,10 @@ def parse_questions_from_file(filepath: str) -> List[Dict]:
         # 提取元信息 <!-- id:xxx | category:xxx | difficulty:x | difficulty_label:xxx -->
         meta_match = re.search(r"<!--\s*(.*?)\s*-->", block)
         meta = {"id": "", "category": "", "difficulty": "2", "difficulty_label": "中级"}
-        if meta_match:
-            pairs = meta_match.group(1).split("|")
+        if meta_match:                  #group(1) 捕获纯净文本
+            pairs = meta_match.group(1).split("|")   #  管道符切割元信息【id:xxx | category:xxx | difficulty:x | difficulty_label:xxx】
             for pair in pairs:
-                kv = pair.strip().split(":", 1)
+                kv = pair.strip().split(":", 1)    #  冒号切割元信息【id:xxx | category:xxx | difficulty:x | difficulty_label:xxx】
                 if len(kv) == 2:
                     meta[kv[0].strip()] = kv[1].strip()
 
@@ -96,7 +99,7 @@ class KnowledgeBaseBuilder:
             for q in questions:
                 q["role"] = role
                 q["source_file"] = filename
-            all_questions.extend(questions)
+            all_questions.extend(questions)         # 加入末尾 合并所有角色的题目[python_dev,java_dev]
             print(f"  {filename}: 解析出 {len(questions)} 道题")
         return all_questions
 
@@ -119,7 +122,7 @@ class KnowledgeBaseBuilder:
         print(f"  模型路径: {config.EMBEDDING_MODEL_PATH}")
         os.makedirs(self.chroma_path, exist_ok=True)
 
-        embeddings = get_embeddings()
+        embeddings = get_embeddings()           #  加载agent.llm 里面实例化的 BGE 模型, 用于向量化题目
 
         # 如果强制重建, 先删除旧集合
         if force_recreate:
@@ -128,8 +131,8 @@ class KnowledgeBaseBuilder:
             try:
                 client.delete_collection(self.collection_name)
                 print("  已清空旧向量库 (将重建)")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("清空旧集合失败 (首次构建时正常, 忽略): %s", e)
 
         # Step 3: 构建 LangChain Document 列表并写入 Chroma
         print("\n[3/3] 向量化并存入 ChromaDB...")
@@ -176,7 +179,7 @@ class KnowledgeBaseBuilder:
         # 按角色统计
         role_counts = {}
         for q in questions:
-            role_counts[q["role"]] = role_counts.get(q["role"], 0) + 1
+            role_counts[q["role"]] = role_counts.get(q["role"], 0) + 1  # 各角色题量: {'Java': 15, 'Python': 12, '前端': 8}
         print(f"  各角色题量: {role_counts}")
         return True
 

@@ -1,0 +1,34 @@
+# AI 模拟面试官系统 — 一键部署
+# 用法:
+#   1. 复制 backend/.env.example → backend/.env, 填入 LLM_API_KEY
+#   2. docker compose up --build         # 构建并启动后端 (:8000)
+#   3. 首次需建库: docker compose run --rm backend python main.py build
+#      (之后 chroma_db 卷持久化, 无需重复)
+#   4. 浏览器访问 http://localhost:8000 (若已将前端构建产物放入 backend/static/)
+version: "3.8"
+
+services:
+  backend:
+    build: ./backend
+    container_name: ai-interview-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # 题库 (可宿主编辑后重建)
+      - ./backend/data:/app/data
+      # 向量库持久化 (命名卷, 首次 build 后保留)
+      - backend-chroma:/app/chroma_db
+      # 报告/上传持久化
+      - ./backend/reports:/app/reports
+      - ./backend/uploads:/app/uploads
+      # 前端构建产物 (npm run build 后拷入, 单服务访问)
+      - ./backend/static:/app/static
+    env_file:
+      - ./backend/.env
+    environment:
+      # 容器内无宿主本地 BGE 路径, 改用 HuggingFace Hub 自动下载 (首次较慢)
+      - LOCAL_BGE_MODEL_PATH=BAAI/bge-base-zh-v1.5
+    restart: unless-stopped
+
+volumes:
+  backend-chroma:

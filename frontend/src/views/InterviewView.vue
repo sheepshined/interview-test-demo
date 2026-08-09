@@ -17,7 +17,7 @@
       <div ref="chatRef" style="flex:1;overflow-y:auto;padding:24px 20px;">
         <div v-for="(msg,i) in displayMessages" :key="i" :style="msg.side==='ai'?'display:flex;gap:10px;margin-bottom:16px;':'display:flex;gap:10px;margin-bottom:16px;flex-direction:row-reverse;'">
           <div :style="msg.side==='ai'?'width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;background:var(--brand-900);color:var(--brand-50);':'width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0;background:var(--bg-200);color:var(--text-secondary);'">{{ msg.side==='ai'?'AI':'我' }}</div>
-          <div :style="msg.side==='ai'?'max-width:70%;padding:12px 16px;border-radius:12px;font-size:14px;line-height:1.7;background:var(--bg-100);color:var(--text-primary);word-break:break-word;':'max-width:70%;padding:12px 16px;border-radius:12px;font-size:14px;line-height:1.7;background:var(--bg-200);color:var(--text-primary);word-break:break-word;'">
+          <div :class="msg.side==='ai'&&msg.msgType==='reaction'?'reaction-bubble':''" :style="msg.side==='ai'?'max-width:70%;padding:12px 16px;border-radius:12px;font-size:14px;line-height:1.7;background:var(--bg-100);color:var(--text-primary);word-break:break-word;':'max-width:70%;padding:12px 16px;border-radius:12px;font-size:14px;line-height:1.7;background:var(--bg-200);color:var(--text-primary);word-break:break-word;'">
             {{ msg.displayText }}
             <span v-if="msg.streaming" style="color:var(--brand-600);animation:blink 0.8s infinite;">|</span>
           </div>
@@ -102,15 +102,15 @@ const isThinking = computed(() => {
   return last?.type === 'stream_start' && last.streamType !== 'report'
 })
 
-// 只显示题目、追问、用户回答，不显示报告
+// 只显示题目、追问、用户回答、开场/反馈/收尾，不显示报告
 const displayMessages = computed(() => messages.value.filter(m => {
   if (m.type === 'report') return false
   if (m.type === 'stream_start' && m.streamType === 'report') return false
-  return ['question','followup','stream_start','user_answer','status'].includes(m.type)
+  return ['opening','question','reaction','followup','closing','stream_start','user_answer','status'].includes(m.type)
 }).map(m => {
-  if(m.type==='user_answer') return {side:'user',displayText:m.content}
-  if(m.type==='status') return {side:'ai',displayText:m.content}
-  return {side:'ai',displayText:m.content||m.full||'',streaming:m.type==='stream_start'}
+  if(m.type==='user_answer') return {side:'user',displayText:m.content,msgType:'user_answer'}
+  if(m.type==='status') return {side:'ai',displayText:m.content,msgType:'status'}
+  return {side:'ai',displayText:m.content||m.full||'',streaming:m.type==='stream_start',msgType:m.type}
 }))
 
 watch(messages, async () => {
@@ -149,11 +149,12 @@ onMounted(() => {
   if(!s){router.push('/choose-job');return}
   const d=JSON.parse(s)
   roleTitle.value=d.title||'模拟面试'
+  totalCount.value=d.questionCount||5
   connect()
   const check=setInterval(()=>{
     if(connected.value){
       clearInterval(check)
-      sendConfig(d.key,5,2,d.resumeContext,d.resumeSkills)
+      sendConfig(d.key,d.questionCount||5,2,d.resumeContext,d.resumeSkills)
     }
   },200)
 })
@@ -191,4 +192,5 @@ function handleExit() {
 @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0;} }
 .loading-spinner { display:inline-block; width:16px; height:16px; border:2px solid var(--border-default); border-top-color:var(--brand-900); border-radius:50%; animation:spin 0.8s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
+.reaction-bubble { background: var(--surface) !important; border-left: 3px solid var(--brand-400) !important; font-style: italic; }
 </style>
