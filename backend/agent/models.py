@@ -11,23 +11,27 @@ from pydantic import BaseModel, Field
 class ScoreBreakdown(BaseModel):
     """评分维度细分 (四维度)"""
     accuracy: int = Field(
+        ge=0, le=10,
         description="准确性评分 1-10, 是否正确回答核心概念"
     )
     completeness: int = Field(
+        ge=0, le=10,
         description="完整性评分 1-10, 是否覆盖所有关键点"
     )
     depth: int = Field(
+        ge=0, le=10,
         description="深度评分 1-10, 是否有深入分析和独到见解"
     )
     clarity: int = Field(
+        ge=0, le=10,
         description="表达清晰度评分 1-10, 逻辑是否清晰、表达是否规范"
     )
 
 
 class ScoreResult(BaseModel):
     """LLM 评分结果 — 通过 PydanticOutputParser 强制结构化输出"""
-    score: int = Field(description="总分 1-10 的整数")
-    max_score: int = Field(default=10, description="满分分值")
+    score: int = Field(ge=0, le=10, description="总分 1-10 的整数，解析失败可为 0")
+    max_score: int = Field(default=10, ge=1, le=10, description="满分分值")
     score_breakdown: ScoreBreakdown = Field(description="四维度评分细分")
     hit_points: List[str] = Field(
         default_factory=list, description="候选人命中的得分点列表"
@@ -54,4 +58,3 @@ class ScoreResult(BaseModel):
             "feedback": self.feedback,
             "is_correct": self.is_correct,
         }
-

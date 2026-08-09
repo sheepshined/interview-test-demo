@@ -21,6 +21,7 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 CHROMA_DB_PATH = os.path.join(BASE_DIR, "chroma_db")
 REPORTS_DIR = os.path.join(BASE_DIR, "reports")
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
+INTERVIEW_RECORDS_DIR = os.path.join(BASE_DIR, "agent")
 COLLECTION_NAME = "interview_questions"
 
 # 确保目录存在

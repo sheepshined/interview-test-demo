@@ -1,8 +1,8 @@
 """
 server.py — AI 面试系统 FastAPI 后端 (LangGraph 版, 流式输出)
 
-架构 (阶段1 重构): 面试流程由 LangGraph StateGraph 驱动 (agent/graph.py),
-  WebSocket /ws/chat 仅作"人在回路驱动器": 接收 config/answer/report 消息,
+架构 (答辩稳定版): 面试流程由 LangGraph StateGraph 驱动 (agent/graph.py),
+  WebSocket /ws/chat 仅作"人在回路驱动器": 接收 config/answer/end/report 消息,
   转为 graph 的 astream / Command(resume=...) 调用, 并把图推送的 custom event
   转发给前端。替代原 server.py 的 if/elif 手动编排。
 
@@ -16,6 +16,7 @@ server.py — AI 面试系统 FastAPI 后端 (LangGraph 版, 流式输出)
   GET  /                       静态前端页面
 """
 import json
+import logging
 import os
 import sys
 import uuid
@@ -40,8 +41,11 @@ from resume.parser import parse_resume, build_resume_context
 import config
 from common import match_role, get_difficulty_label, extract_skills
 from agent.graph import build_interview_graph
+from agent.protocol import command_allowed, phase_error
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
+
+logger = logging.getLogger(__name__)
 
 # --- FastAPI 应用 ---
 app = FastAPI(title="AI Interview System (LangGraph)", version="3.0.0")
@@ -81,7 +85,7 @@ def get_graph():
     """获取 (懒加载) 编译后的 LangGraph 面试图, 带 MemorySaver checkpointer
 
     首次调用时构建图 (需 retriever 就绪), 之后复用。
-    checkpointer 按 thread_id 持久化暂停点, 支持断线续接 (阶段2 换 SqliteSaver 持久化到磁盘)。
+    checkpointer 按 thread_id 保存当前进程内的暂停点；服务重启续接不在本轮范围。
     """
     global _graph, _checkpointer
     if _graph is None:
@@ -92,15 +96,15 @@ def get_graph():
 
 
 async def run_graph_stream(ws: WebSocket, graph, input_or_command, thread_id: str):
-    """运行 graph, 转发 custom event; 并从 values stream 检测 decision 变化补发给前端
-
-    - custom stream: 节点内 get_stream_writer() 推送的 stream_start/chunk/end 等直接转发
-    - values stream: 监听 state.decision 变化, 推送 decision 消息 (resume 后首个 custom event
-      偶发丢失, 此处从状态可靠补发)
-    图在 interrupt() 处暂停时, astream 自然结束本轮; 收到下一轮 Command(resume=...) 再继续。
-    """
+    """运行 graph、转发 custom event，并同步会话 phase。"""
     cfg = {"configurable": {"thread_id": thread_id}}
-    last_decision = None
+    final_values = {}
+    try:
+        snapshot = graph.get_state(cfg)
+        previous = snapshot.values or {}
+        last_decision = previous.get("decision")
+    except Exception:
+        last_decision = None
     try:
         async for mode, payload in graph.astream(
             input_or_command, cfg, stream_mode=["custom", "values"]
@@ -108,6 +112,14 @@ async def run_graph_stream(ws: WebSocket, graph, input_or_command, thread_id: st
             if mode == "custom" and isinstance(payload, dict):
                 await ws.send_json(payload)
             elif mode == "values" and isinstance(payload, dict):
+                final_values = payload
+                if thread_id in _sessions:
+                    _sessions[thread_id]["phase"] = payload.get("phase", "")
+                    _sessions[thread_id]["answered_count"] = payload.get(
+                        "main_question_count", 0
+                    )
+                    if payload.get("report_id"):
+                        _sessions[thread_id]["report_id"] = payload["report_id"]
                 decision = payload.get("decision")
                 if decision and decision != last_decision:
                     last_decision = decision
@@ -116,11 +128,31 @@ async def run_graph_stream(ws: WebSocket, graph, input_or_command, thread_id: st
                         "action": decision.get("action", "next"),
                         "reason": decision.get("reason", ""),
                     })
+    except WebSocketDisconnect:
+        logger.info("WebSocket 在图执行期间断开 (thread=%s)", thread_id)
+        raise
     except Exception as e:
-        await ws.send_json({"type": "error", "content": f"流程错误: {e}"})
+        logger.exception("LangGraph 流程错误 (thread=%s): %s", thread_id, e)
+        if thread_id in _sessions:
+            _sessions[thread_id]["status"] = "error"
+        try:
+            await ws.send_json({"type": "error", "content": "面试流程执行失败，请重试"})
+        except (WebSocketDisconnect, RuntimeError):
+            logger.info("错误事件未发送：连接已关闭 (thread=%s)", thread_id)
+    return final_values
 
 
-# --- 进行中面试会话登记 (断线续接, 阶段2) ---
+def get_graph_values(graph, thread_id: str) -> dict:
+    """读取线程当前已提交状态，用于校验 WebSocket 命令阶段。"""
+    try:
+        snapshot = graph.get_state({"configurable": {"thread_id": thread_id}})
+        return dict(snapshot.values or {})
+    except Exception as exc:
+        logger.warning("读取图状态失败 (thread=%s): %s", thread_id, exc)
+        return {}
+
+
+# --- 进行中面试会话登记（仅当前进程）---
 _sessions: dict = {}
 
 
@@ -135,8 +167,8 @@ class LoginRequest(BaseModel):
 
 class InterviewConfig(BaseModel):
     role: str = "python_dev"
-    question_count: int = 5
-    difficulty: int = 2
+    question_count: int = Field(default=5, ge=1, le=20)
+    difficulty: int = Field(default=2, ge=1, le=3)
     resume_context: str = ""
     resume_skills: List[str] = Field(default_factory=list)
 
@@ -149,7 +181,7 @@ class ConfigResponse(BaseModel):
     question_count: int = 0
     difficulty: int = 0
     difficulty_label: str = ""
-    categories: List[str] = []
+    categories: List[str] = Field(default_factory=list)
 
 
 class TextResumeRequest(BaseModel):
@@ -284,8 +316,8 @@ def api_list_reports():
                     "total_questions": data.get("total_questions", 0),
                     "timestamp": data.get("timestamp", ""),
                 })
-            except Exception:
-                pass
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning("跳过无效报告元数据 %s: %s", fn, exc)
     return {"success": True, "reports": reports}
 
 
@@ -317,7 +349,7 @@ def api_get_report_radar(report_id: str):
 
 @app.get("/api/interviews")
 def api_list_interviews():
-    """列出进行中/历史的面试会话 (断线续接, 阶段2)"""
+    """列出当前进程内登记的面试会话。"""
     return {"success": True, "interviews": list(_sessions.values())}
 
 
@@ -327,17 +359,9 @@ def api_list_interviews():
 
 @app.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket):
-    """实时面试对话 — LangGraph 驱动版
-
-    前端发 config/answer/report 消息, 后端转为 graph 的 astream / Command(resume=...):
-      config  → graph.astream(initial_state)          跑 opening + ask, 到首个 interrupt (等回答)
-      answer  → graph.astream(Command(resume=answer)) 跑评分+决策, 到下一 interrupt (追问/下一题) 或结束
-      report  → graph.astream(Command(resume="report")) 从 closing 的 interrupt 恢复, 跑 summary
-
-    图推送的 custom event (stream_start/chunk/end/decision/interview_ended) 由 run_graph_stream 转发。
-    """
+    """实时面试对话；所有 resume 命令都先按 graph phase 校验。"""
     await ws.accept()
-    thread_id = None   # 由 config 消息确定 (支持断线重连带 thread_id)
+    thread_id = None
 
     try:
         while True:
@@ -347,49 +371,63 @@ async def ws_chat(ws: WebSocket):
             except json.JSONDecodeError:
                 await ws.send_json({"type": "error", "content": "无效的 JSON 格式"})
                 continue
+            if not isinstance(msg, dict):
+                await ws.send_json({"type": "error", "content": "消息必须是 JSON 对象"})
+                continue
 
             msg_type = msg.get("type", "")
 
-            # ---- config: 开启一场新面试, 或断线重连 ----
             if msg_type == "config":
                 thread_id = msg.get("thread_id") or f"iv_{uuid.uuid4().hex[:12]}"
                 role = msg.get("role", "python_dev")
                 if role not in config.ROLES:
                     role = "general_hr"
-                count = int(msg.get("question_count", 5))
-                diff = int(msg.get("difficulty", 2))
+                try:
+                    count = max(1, min(int(msg.get("question_count", 5)), 20))
+                    diff = int(msg.get("difficulty", 2))
+                except (TypeError, ValueError):
+                    await ws.send_json({"type": "error", "content": "题量或难度格式错误"})
+                    continue
+                if diff not in config.DIFFICULTY_LABELS:
+                    await ws.send_json({"type": "error", "content": "难度必须为 1、2 或 3"})
+                    continue
 
                 try:
                     graph = get_graph()
-                except Exception as e:
-                    await ws.send_json({"type": "error", "content": f"引擎初始化失败: {e}"})
+                except Exception as exc:
+                    logger.exception("引擎初始化失败: %s", exc)
+                    await ws.send_json({"type": "error", "content": "引擎初始化失败，请检查服务配置"})
                     continue
 
-                r = get_retriever()
+                retriever = get_retriever()
                 role_info = config.ROLES[role]
-
-                # 断线重连: 该 thread 已有进行中会话, 不重新初始化 (MemorySaver 内状态仍在)
                 existing = _sessions.get(thread_id)
                 if existing and existing.get("status") == "ongoing" and msg.get("thread_id"):
                     await ws.send_json({
                         "type": "config_ok", "content": "会话已恢复, 请继续作答",
+                        "thread_id": thread_id,
                         "role_key": existing["role_key"], "role_title": existing["role_title"],
                         "question_count": existing["question_count"],
                         "difficulty": existing["difficulty"],
                         "difficulty_label": existing.get("difficulty_label", ""),
-                        "categories": r.get_categories(role=existing["role_key"]),
+                        "categories": retriever.get_categories(role=existing["role_key"]),
+                        "phase": existing.get("phase", ""),
                         "resumed": True,
                     })
-                    await ws.send_json({"type": "status", "content": "已恢复到中断点, 请继续回答上一题或输入 skip 换题"})
+                    await ws.send_json({
+                        "type": "status",
+                        "content": "已恢复内存中的会话状态",
+                    })
                     continue
 
-                # 新建会话
                 await ws.send_json({
                     "type": "config_ok", "content": "配置完成",
+                    "thread_id": thread_id,
                     "role_key": role, "role_title": role_info["title"],
                     "question_count": count, "difficulty": diff,
                     "difficulty_label": get_difficulty_label(diff),
-                    "categories": r.get_categories(role=role),
+                    "categories": retriever.get_categories(role=role),
+                    "resumed": False,
                 })
                 _sessions[thread_id] = {
                     "thread_id": thread_id, "role_key": role, "role_title": role_info["title"],
@@ -397,43 +435,91 @@ async def ws_chat(ws: WebSocket):
                     "difficulty_label": get_difficulty_label(diff),
                     "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "status": "ongoing",
+                    "phase": "starting",
+                    "answered_count": 0,
                 }
 
-                # 构建初始 state, 跑图到首个 interrupt (opening + 第一题)
                 initial_state = {
                     "thread_id": thread_id, "role_key": role, "difficulty": diff,
-                    "total_count": count, "resume_context": msg.get("resume_context", ""),
-                    "resume_skills": msg.get("resume_skills", []),
+                    "total_count": count,
+                    "resume_context": str(msg.get("resume_context", ""))[:6000],
+                    "resume_skills": (
+                        msg.get("resume_skills", [])[:30]
+                        if isinstance(msg.get("resume_skills", []), list) else []
+                    ),
                 }
                 await run_graph_stream(ws, graph, initial_state, thread_id)
 
-            # ---- answer: 候选人回答 ----
             elif msg_type == "answer":
                 if not thread_id:
                     await ws.send_json({"type": "error", "content": "请先发送 config 配置面试"})
                     continue
-                answer = msg.get("content", "").strip()
+                answer = str(msg.get("content", "")).strip()
                 if not answer:
                     await ws.send_json({"type": "error", "content": "回答不能为空"})
                     continue
-                if answer.lower() in ("quit", "exit", "q"):
-                    await ws.send_json({"type": "interview_ended", "content": "面试已结束", "can_report": True})
+                if len(answer) > 5000:
+                    await ws.send_json({"type": "error", "content": "单次回答不能超过 5000 字"})
                     continue
                 graph = get_graph()
-                # resume 图: 跑评分+决策, 到下一 interrupt 或结束
-                await run_graph_stream(ws, graph, Command(resume=answer), thread_id)
+                values = get_graph_values(graph, thread_id)
+                phase = values.get("phase", "")
+                if not command_allowed("answer", phase):
+                    await ws.send_json({
+                        "type": "error",
+                        "content": phase_error("answer", phase),
+                    })
+                    continue
+                action = "end" if answer.lower() in {"quit", "exit", "q"} else "answer"
+                await run_graph_stream(
+                    ws,
+                    graph,
+                    Command(resume={"action": action, "content": answer}),
+                    thread_id,
+                )
 
-            # ---- report: 生成面试报告 ----
+            elif msg_type == "end":
+                if not thread_id:
+                    await ws.send_json({"type": "error", "content": "面试尚未开始"})
+                    continue
+                graph = get_graph()
+                phase = get_graph_values(graph, thread_id).get("phase", "")
+                if not command_allowed("end", phase):
+                    await ws.send_json({
+                        "type": "error",
+                        "content": phase_error("end", phase),
+                    })
+                    continue
+                await run_graph_stream(
+                    ws,
+                    graph,
+                    Command(resume={"action": "end", "content": ""}),
+                    thread_id,
+                )
+
             elif msg_type == "report":
                 if not thread_id:
                     await ws.send_json({"type": "error", "content": "面试尚未开始"})
                     continue
                 graph = get_graph()
-                # 从 closing 的 interrupt 恢复, 跑 summary
-                await run_graph_stream(ws, graph, Command(resume="report"), thread_id)
-                # 标记会话结束
-                if thread_id in _sessions:
+                values = get_graph_values(graph, thread_id)
+                phase = values.get("phase", "")
+                if not command_allowed("report", phase):
+                    await ws.send_json({
+                        "type": "error",
+                        "content": phase_error("report", phase),
+                    })
+                    continue
+                await run_graph_stream(
+                    ws,
+                    graph,
+                    Command(resume={"action": "report", "content": ""}),
+                    thread_id,
+                )
+                final_values = get_graph_values(graph, thread_id)
+                if thread_id in _sessions and final_values.get("phase") == "completed":
                     _sessions[thread_id]["status"] = "ended"
+                    _sessions[thread_id]["report_id"] = final_values.get("report_id", "")
 
             else:
                 await ws.send_json({"type": "error", "content": f"未知消息类型: {msg_type}"})
@@ -441,9 +527,9 @@ async def ws_chat(ws: WebSocket):
     except WebSocketDisconnect:
         print("[WS] 客户端断开连接")
     except Exception as e:
-        print(f"[WS] 错误: {e}")
+        logger.exception("WebSocket 错误: %s", e)
         try:
-            await ws.send_json({"type": "error", "content": f"服务器内部错误: {str(e)}"})
+            await ws.send_json({"type": "error", "content": "服务器内部错误"})
         except Exception:
             pass
 

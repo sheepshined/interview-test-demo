@@ -15,9 +15,15 @@
     </div>
     <div style="flex:1;display:flex;overflow:hidden;">
       <div ref="chatRef" style="flex:1;overflow-y:auto;padding:24px 20px;">
+        <div v-if="connectionError" class="ds-card" style="padding:12px 16px;margin-bottom:16px;color:var(--error,#dc2626);font-size:13px;">
+          {{ connectionError }}
+        </div>
         <div v-for="(msg,i) in displayMessages" :key="i" :style="msg.side==='ai'?'display:flex;gap:10px;margin-bottom:16px;':'display:flex;gap:10px;margin-bottom:16px;flex-direction:row-reverse;'">
           <div :style="msg.side==='ai'?'width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;background:var(--brand-900);color:var(--brand-50);':'width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0;background:var(--bg-200);color:var(--text-secondary);'">{{ msg.side==='ai'?'AI':'我' }}</div>
           <div :class="msg.side==='ai'&&msg.msgType==='reaction'?'reaction-bubble':''" :style="msg.side==='ai'?'max-width:70%;padding:12px 16px;border-radius:12px;font-size:14px;line-height:1.7;background:var(--bg-100);color:var(--text-primary);word-break:break-word;':'max-width:70%;padding:12px 16px;border-radius:12px;font-size:14px;line-height:1.7;background:var(--bg-200);color:var(--text-primary);word-break:break-word;'">
+            <div v-if="msg.questionId" style="font-family:var(--font-mono);font-size:11px;line-height:1.4;color:var(--text-faint);margin-bottom:4px;">
+              题目 ID：{{ msg.questionId }}
+            </div>
             {{ msg.displayText }}
             <span v-if="msg.streaming" style="color:var(--brand-600);animation:blink 0.8s infinite;">|</span>
           </div>
@@ -61,13 +67,13 @@
             <span>第 {{ i }} 题</span>
           </div>
         </div>
-        <button v-if="!ended" class="ds-btn ds-btn-danger w-full" style="margin-top:12px;padding:10px;" @click="endInterview">提前结束面试</button>
+        <button v-if="!ended" class="ds-btn ds-btn-danger w-full" style="margin-top:12px;padding:10px;" @click="endInterview" :disabled="inputBusy">提前结束面试</button>
       </div>
     </div>
     <div v-if="!ended" style="background:var(--surface);border-top:1px solid var(--border-default);padding:12px 20px;display:flex;gap:10px;flex-shrink:0;">
-      <input v-model="userInput" type="text" :placeholder="isThinking?'AI 正在思考…':'输入你的回答...'" class="ds-input" style="flex:1;" @keyup.enter="sendAnswer" :disabled="isThinking" />
-      <button class="ds-btn ds-btn-primary" style="padding:10px 20px;" @click="sendAnswer" :disabled="!userInput.trim()||isThinking">
-        <span v-if="isThinking" class="loading-spinner" style="width:14px;height:14px;border-width:2px;"></span>
+      <input v-model="userInput" type="text" :placeholder="inputBusy?'AI 正在处理…':'输入你的回答...'" class="ds-input" style="flex:1;" @keyup.enter="sendAnswer" :disabled="inputBusy" />
+      <button class="ds-btn ds-btn-primary" style="padding:10px 20px;" @click="sendAnswer" :disabled="!userInput.trim()||inputBusy">
+        <span v-if="inputBusy" class="loading-spinner" style="width:14px;height:14px;border-width:2px;"></span>
         <span v-else>发送</span>
       </button>
     </div>
@@ -78,7 +84,17 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWebSocket } from '../composables/useWebSocket'
 const router = useRouter()
-const { connected, messages, connect, sendConfig, sendAnswer: wsSendAnswer, requestReport, close } = useWebSocket()
+const {
+  messages,
+  connectionError,
+  isStreaming,
+  connect,
+  sendConfig,
+  sendAnswer: wsSendAnswer,
+  sendEnd,
+  requestReport,
+  close,
+} = useWebSocket()
 const chatRef = ref(null)
 const userInput = ref('')
 const roleTitle = ref('')
@@ -87,6 +103,7 @@ const questionNum = ref(1)
 const ended = ref(false)
 const reportData = ref('')
 const isGeneratingReport = ref(false)
+const awaitingResponse = ref(false)
 const startTime = ref(Date.now())
 const elapsed = ref(0)
 let timerInterval = null
@@ -94,91 +111,103 @@ onMounted(() => { timerInterval=setInterval(()=>{ if(!ended.value) elapsed.value
 onUnmounted(() => { if(timerInterval) clearInterval(timerInterval) })
 const timerDisplay = computed(() => { const m=String(Math.floor(elapsed.value/60)).padStart(2,'0'); const s=String(elapsed.value%60).padStart(2,'0'); return m+':'+s })
 const progressPercent = computed(() => Math.min((questionNum.value/totalCount.value)*100,100))
-const answeredCount = computed(() => Math.min(questionNum.value, totalCount.value))
+const answeredCount = ref(0)
 
-// 判断是否正在流式输出题目或追问（不包含报告）
-const isThinking = computed(() => {
-  const last = messages.value[messages.value.length - 1]
-  return last?.type === 'stream_start' && last.streamType !== 'report'
-})
+const isThinking = computed(() => isStreaming.value && !isGeneratingReport.value)
+const inputBusy = computed(() => isThinking.value || awaitingResponse.value)
 
 // 只显示题目、追问、用户回答、开场/反馈/收尾，不显示报告
 const displayMessages = computed(() => messages.value.filter(m => {
   if (m.type === 'report') return false
   if (m.type === 'stream_start' && m.streamType === 'report') return false
-  return ['opening','question','reaction','followup','closing','stream_start','user_answer','status'].includes(m.type)
+  return ['opening','question','reaction','followup','closing','stream_start','user_answer','status','error'].includes(m.type)
 }).map(m => {
   if(m.type==='user_answer') return {side:'user',displayText:m.content,msgType:'user_answer'}
   if(m.type==='status') return {side:'ai',displayText:m.content,msgType:'status'}
-  return {side:'ai',displayText:m.content||m.full||'',streaming:m.type==='stream_start',msgType:m.type}
+  if(m.type==='error') return {side:'ai',displayText:`错误：${m.content}`,msgType:'error'}
+  return {side:'ai',displayText:m.content||m.full||'',streaming:m.type==='stream_start',msgType:m.type,questionId:m.questionId||''}
 }))
 
 watch(messages, async () => {
   await nextTick()
   if(chatRef.value) chatRef.value.scrollTop=chatRef.value.scrollHeight
 
-  for(let i=messages.value.length-1;i>=0;i--){
+  for(let i=0;i<messages.value.length;i++){
     const m=messages.value[i]
-    // 题目计数
-    if(m.type==='question'&&!m._counted){
-      m._counted=true
-      if(questionNum.value<totalCount.value) questionNum.value++
+    if(m.type==='stream_start' && ['question','followup','closing'].includes(m.streamType)){
+      awaitingResponse.value=false
+      if(m.streamType==='question' && m.questionIndex){
+        questionNum.value=m.questionIndex
+        if(m.totalCount) totalCount.value=m.totalCount
+      }
     }
-    // 面试结束
-    if(m.type==='interview_ended'){
+    if(m.type==='question' && m.questionIndex && !m._questionHandled){
+      m._questionHandled=true
+      questionNum.value=m.questionIndex
+    }
+    if(m.type==='interview_ended' && !m._endHandled){
+      m._endHandled=true
       ended.value=true
+      awaitingResponse.value=false
+      answeredCount.value=Number(m.answeredCount||0)
+      if(m.totalCount) totalCount.value=Number(m.totalCount)
     }
-    // 报告生成完成 → 自动跳转
-    if(m.type==='report' && m.full && isGeneratingReport.value){
-      reportData.value=m.full
+    if(m.type==='report_ready' && m.reportId && !m._reportHandled){
+      m._reportHandled=true
+      reportData.value=m.content||''
       isGeneratingReport.value=false
-      // 自动跳转到总结页面
       sessionStorage.setItem('reportData', reportData.value)
+      sessionStorage.setItem('reportId', m.reportId)
       sessionStorage.setItem('roleTitle', roleTitle.value)
       sessionStorage.setItem('answeredCount', String(answeredCount.value))
       sessionStorage.setItem('totalCount', String(totalCount.value))
       sessionStorage.setItem('elapsedTime', timerDisplay.value)
-      router.push('/summary')
+      router.push({name:'Summary',params:{reportId:m.reportId}})
       return
+    }
+    if(m.type==='error' && !m._errorHandled){
+      m._errorHandled=true
+      awaitingResponse.value=false
+      isGeneratingReport.value=false
     }
   }
 }, {deep:true})
 
-onMounted(() => {
+onMounted(async () => {
   const s=sessionStorage.getItem('selectedRole')
   if(!s){router.push('/choose-job');return}
-  const d=JSON.parse(s)
+  let d
+  try { d=JSON.parse(s) } catch (_) { router.push('/choose-job');return }
   roleTitle.value=d.title||'模拟面试'
   totalCount.value=d.questionCount||5
-  connect()
-  const check=setInterval(()=>{
-    if(connected.value){
-      clearInterval(check)
-      sendConfig(d.key,d.questionCount||5,2,d.resumeContext,d.resumeSkills)
-    }
-  },200)
+  try {
+    await connect(10000)
+    awaitingResponse.value=true
+    sendConfig(d.key,d.questionCount||5,2,d.resumeContext,d.resumeSkills)
+  } catch (_) {
+    awaitingResponse.value=false
+  }
 })
 onUnmounted(() => close())
 
 function sendAnswer() {
-  if(!userInput.value.trim()||isThinking.value)return
+  if(!userInput.value.trim()||inputBusy.value)return
   const t=userInput.value.trim()
   userInput.value=''
   messages.value.push({type:'user_answer',content:t})
-  wsSendAnswer(t)
+  if(wsSendAnswer(t)) awaitingResponse.value=true
 }
 
 function endInterview() {
   if(confirm('确定要提前结束面试吗？')) {
-    ended.value=true
-    // 清空输入
     userInput.value=''
+    if(sendEnd()) awaitingResponse.value=true
   }
 }
 
 function generateReport() {
-  isGeneratingReport.value=true
-  requestReport()
+  if(isGeneratingReport.value)return
+  if(requestReport()) isGeneratingReport.value=true
 }
 
 function handleExit() {

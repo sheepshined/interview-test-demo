@@ -2,8 +2,70 @@
 
 > 评估日期：2026-08-09
 > 评估对象：`DEMO3/TOtal` 当前工作区
-> 评估方式：代码静态审阅、目录与配置核验、Python 语法检查、前端生产构建、Docker Compose 配置检查、题库与 Chroma 数据核对
-> 说明：本文是新增评估文档，不代表已经实施下述修复。
+> 评估方式：代码静态审阅、Fake LLM/Fake Retriever 回归测试、真实 LLM WebSocket 烟雾测试、浏览器页面验收、Python 语法检查、前端生产构建、题库与 Chroma 数据核对
+> 说明：第 0 节是稳定版实施后的最终复评；第 1–7 节保留为实施前问题基线，便于答辩说明优化演进。
+
+## 0. 答辩稳定版实施复评
+
+### 0.1 当前结论
+
+本轮锁定范围内的稳定性改造已完成，项目已从“架构存在但核心恢复语义不可靠”提升为“可重复演示、可用测试复验的答辩稳定版”。
+
+- **本轮计划完成度：100%**。LangGraph 恢复安全、阶段协议、题目/评分/报告关联、前端本场报告路由、自动化测试和双服务真实验收均已落地。
+- **答辩演示就绪度：约 92%**。核心技术叙事与现场闭环已有真实证据；剩余风险主要来自外部 LLM 服务和本机环境，不是当前状态机正确性。
+- **项目总体完成度：约 82%**。答辩目标已经完成，Docker 单服务、服务重启续接、生产鉴权、CI、监控和多实例部署仍未纳入本轮。
+- **生产就绪度仍约 40%**。本轮没有把答辩原型包装成生产系统，也不在答辩中作此承诺。
+
+### 0.2 已实施的主流程
+
+```mermaid
+flowchart LR
+    A["configure"] --> B["opening"]
+    B --> C["prepare_question"]
+    C --> D["emit_question"]
+    D --> E["wait_answer / interrupt"]
+    E --> F["score_initial"]
+    F -->|"score < 5"| G["prepare_followup"]
+    G --> H["emit_followup"]
+    H --> I["wait_followup / interrupt"]
+    I --> J["score_combined"]
+    F -->|"score >= 5"| K["finalize_question"]
+    J --> K
+    K -->|"下一题"| C
+    K -->|"完成或 end"| L["closing"]
+    L --> M["wait_report / interrupt"]
+    M --> N["summary + report_ready"]
+```
+
+关键约束已经固化为代码和测试：随机选题先写入 State；输出节点不等待输入；三个等待节点只负责 `interrupt()`；主问题只在 `finalize_question` 增加完成数；低分题最多追问一次，保留 `initial_score` 并用合并回答得到最终 `score`。
+
+### 0.3 最终验收证据
+
+| 验收项 | 最终结果 |
+|---|---|
+| Fake graph / 协议 / parser 测试 | `5 passed`，不依赖网络和 API Key |
+| Python 语法解析 | 27 个项目 Python 文件全部通过 |
+| 题库 | 8 个岗位文件、86 道题、86 个唯一题目 ID |
+| 实际向量库 | 本地 BGE 成功加载，Chroma `interview_questions` 为 86 条 |
+| 前端 production build | Vite 5.4.21，635 modules transformed，构建通过 |
+| 本机双服务 | FastAPI `127.0.0.1:8000` 返回 8 岗位；Vite `127.0.0.1:3000` 返回 HTTP 200 |
+| 真实 2 题协议烟雾 | 第一题低分只追问一次，第二题完整回答不追问；恰好 2 道主问题 |
+| 真实协议报告 | `interview_report_20260809_174222_c842b535_python_dev`；事件题目 `py_004`、`py_014` 与 Markdown/雷达一致 |
+| 浏览器页面验收 | 流式显示、按钮状态、低分追问、提前结束计数、生成报告和精确 Summary 路由均通过 |
+| 页面报告 | `interview_report_20260809_174732_732b5434_python_dev`；报告题目为 `py_015`、`py_016`，页面无控制台错误 |
+
+页面验收还发现并修复了一个真实交互问题：WebSocket 的 `activeStream` 原先是原始对象，分块原地更新不会触发 Vue 响应式刷新，导致题目已到达但页面只显示光标且按钮不可用。现已使用 `reactive()` 管理流对象，并在 production build 与真实页面中复验。
+
+### 0.4 本轮明确不解决的事项
+
+- `MemorySaver` 和 `_sessions` 仍是进程内状态，服务重启后不能续接。
+- Docker 单服务静态托管、SPA fallback 不作为本机双服务答辩的验收项。
+- 固定演示账号、报告所有权、限流、隐私保留策略仍不满足生产要求。
+- 外部 LLM 的可用性和延迟仍会影响现场演示，应准备录屏或已生成报告作为兜底。
+
+---
+
+以下内容为实施前基线评估，用于保留问题发现与优化演进记录。
 
 ## 1. 执行摘要
 

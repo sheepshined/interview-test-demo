@@ -84,36 +84,41 @@
 </template>
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import TopNav from '../components/TopNav.vue'
 import RadarChart from '../components/RadarChart.vue'
-import { getReports, getReport, getReportRadar } from '../api'
+import { getReport, getReportRadar } from '../api'
 
+const route = useRoute()
+const reportId = computed(() => String(route.params.reportId || ''))
 const roleTitle = ref(sessionStorage.getItem('roleTitle') || '模拟面试')
-const rawReport = ref(sessionStorage.getItem('reportData') || '')
+const cachedReportId = sessionStorage.getItem('reportId') || ''
+const rawReport = ref(cachedReportId === reportId.value ? (sessionStorage.getItem('reportData') || '') : '')
 const answeredCount = ref(sessionStorage.getItem('answeredCount') || '0')
 const totalCount = ref(sessionStorage.getItem('totalCount') || '0')
 const elapsedTime = ref(sessionStorage.getItem('elapsedTime') || '00:00')
 const radar = ref(null)
 
 onMounted(async () => {
+  if (!reportId.value) return
   try {
-    const res = await getReports()
-    if (res.success && res.reports && res.reports.length) {
-      const latest = res.reports[0]  // 最新报告
-      // sessionStorage 无报告内容时, 从 API 取
-      if (!rawReport.value) {
-        const r = await getReport(latest.report_id)
-        if (r.success) rawReport.value = r.content
-      }
-      // 取雷达/维度数据
-      const rd = await getReportRadar(latest.report_id)
-      if (rd.success && rd.radar) {
-        radar.value = rd.radar
-        if (rd.radar.role_title) roleTitle.value = rd.radar.role_title
-      }
+    const [reportResult, radarResult] = await Promise.all([
+      getReport(reportId.value),
+      getReportRadar(reportId.value),
+    ])
+    if (reportResult.success) {
+      rawReport.value = reportResult.content
+      sessionStorage.setItem('reportData', reportResult.content)
+      sessionStorage.setItem('reportId', reportId.value)
+    }
+    if (radarResult.success && radarResult.radar) {
+      radar.value = radarResult.radar
+      if (radarResult.radar.role_title) roleTitle.value = radarResult.radar.role_title
+      answeredCount.value = String(radarResult.radar.total_questions ?? answeredCount.value)
+      totalCount.value = String(radarResult.radar.total_questions ?? totalCount.value)
     }
   } catch (e) {
-    console.warn('加载历史报告失败', e)
+    console.warn(`加载报告 ${reportId.value} 失败`, e)
   }
 })
 

@@ -79,22 +79,26 @@ class RobustScoreParser:
     @staticmethod
     def _dict_to_result(data: dict) -> ScoreResult:
         """将字典转换为 ScoreResult, 处理字段缺失"""
+        def bounded_int(value, default=0):
+            try:
+                return max(0, min(int(float(value)), 10))
+            except (TypeError, ValueError):
+                return default
+
         breakdown_data = data.get("score_breakdown", {})
         if not isinstance(breakdown_data, dict):
             breakdown_data = {}
 
-        score = data.get("score", 0)
-        if not isinstance(score, (int, float)):
-            score = 0
+        score = bounded_int(data.get("score", 0))
 
         return ScoreResult(
-            score=int(score),
-            max_score=data.get("max_score", 10),
+            score=score,
+            max_score=max(1, bounded_int(data.get("max_score", 10), 10)),
             score_breakdown={
-                "accuracy": int(breakdown_data.get("accuracy", score)),
-                "completeness": int(breakdown_data.get("completeness", score)),
-                "depth": int(breakdown_data.get("depth", score)),
-                "clarity": int(breakdown_data.get("clarity", score)),
+                "accuracy": bounded_int(breakdown_data.get("accuracy", score), score),
+                "completeness": bounded_int(breakdown_data.get("completeness", score), score),
+                "depth": bounded_int(breakdown_data.get("depth", score), score),
+                "clarity": bounded_int(breakdown_data.get("clarity", score), score),
             },
             hit_points=data.get("hit_points", []) if isinstance(data.get("hit_points"), list) else [],
             missed_points=data.get("missed_points", []) if isinstance(data.get("missed_points"), list) else [],

@@ -7,7 +7,7 @@ const routes = [
   { path: '/job-matching', name: 'JobMatching', component: () => import('../views/JobMatchingView.vue') },
   { path: '/interview', name: 'Interview', component: () => import('../views/InterviewView.vue') },
   { path: '/choose-job', name: 'ChooseJob', component: () => import('../views/ChooseJobView.vue') },
-  { path: '/summary', name: 'Summary', component: () => import('../views/SummaryView.vue') },
+  { path: '/summary/:reportId', name: 'Summary', component: () => import('../views/SummaryView.vue') },
 ]
 
 const router = createRouter({ history: createWebHistory(), routes })
