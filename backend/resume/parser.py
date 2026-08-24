@@ -55,7 +55,12 @@ def parse_resume(pdf_path: str) -> Optional[Dict]:
 
     raw_text = "\n".join(full_text_parts)
     if not raw_text.strip():
-        print("[ERROR] 无法从 PDF 中提取文字 (可能是扫描件, 暂不支持 OCR)")
+        # 扫描件/图片型 PDF: 尝试视觉模型兜底 (千问 qwen-vl)
+        from resume.vision_parser import parse_resume_by_vision, vision_available
+        if vision_available():
+            print("[INFO] 文本提取为空, 尝试视觉模型解析 (可能是扫描件)...")
+            return parse_resume_by_vision(pdf_path)
+        print("[ERROR] 无法从 PDF 中提取文字 (可能是扫描件, 未配置视觉模型则不支持 OCR)")
         return None
 
     raw_text = _clean_text(raw_text)

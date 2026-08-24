@@ -26,6 +26,7 @@ from agent.prompts import (
     summary_prompt,
     opening_prompt,
     closing_prompt,
+    hint_prompt,
 )
 from agent.models import ScoreResult
 
@@ -78,7 +79,14 @@ class RobustScoreParser:
 
     @staticmethod
     def _dict_to_result(data: dict) -> ScoreResult:
-        """将字典转换为 ScoreResult, 处理字段缺失"""
+        """将字典转换为 ScoreResult, 处理字段缺失
+
+        总分校准: 评分标准明确定义"总分为四维度平均", 但 LLM 有时会
+        给出顶层 score 与 score_breakdown 自相矛盾的输出(如 score=0 却
+        四维全 1)。这里以四维均值为准兜底——当顶层 score 与四维均值
+        偏差超过 2 分时, 采用四维均值(四舍五入)。追问分档阈值(3-7)依赖
+        这个 score, 校准后分档更可靠。
+        """
         def bounded_int(value, default=0):
             try:
                 return max(0, min(int(float(value)), 10))
@@ -89,17 +97,38 @@ class RobustScoreParser:
         if not isinstance(breakdown_data, dict):
             breakdown_data = {}
 
-        score = bounded_int(data.get("score", 0))
+        raw_score = bounded_int(data.get("score", 0))
+        breakdown = {
+            "accuracy": bounded_int(breakdown_data.get("accuracy", raw_score), raw_score),
+            "completeness": bounded_int(breakdown_data.get("completeness", raw_score), raw_score),
+            "depth": bounded_int(breakdown_data.get("depth", raw_score), raw_score),
+            "clarity": bounded_int(breakdown_data.get("clarity", raw_score), raw_score),
+        }
+
+        # 总分校准: 评分标准定义"总分=四维平均", 但 LLM 偶尔给出顶层 score
+        # 与四维自相矛盾的输出。两种情况以四维均值为准:
+        #   1. 偏差>2 (明显矛盾, 如 score=0 四维全 3)
+        #   2. 方向性矛盾: score=0 但四维均值>=1 (四维都>0 却给0分),
+        #      或 score>=1 但四维均值=0 (四维全0 却给正分)
+        # 正数四舍五入用 int(x+0.5), 避免 round() 的银行家舍入
+        valid_dims = [v for v in breakdown.values() if isinstance(v, int)]
+        if valid_dims:
+            mean_score = int(sum(valid_dims) / len(valid_dims) + 0.5)
+            if (
+                abs(raw_score - mean_score) > 2
+                or (raw_score == 0 and mean_score >= 1)
+                or (raw_score >= 1 and mean_score == 0)
+            ):
+                score = mean_score
+            else:
+                score = raw_score
+        else:
+            score = raw_score
 
         return ScoreResult(
             score=score,
             max_score=max(1, bounded_int(data.get("max_score", 10), 10)),
-            score_breakdown={
-                "accuracy": bounded_int(breakdown_data.get("accuracy", score), score),
-                "completeness": bounded_int(breakdown_data.get("completeness", score), score),
-                "depth": bounded_int(breakdown_data.get("depth", score), score),
-                "clarity": bounded_int(breakdown_data.get("clarity", score), score),
-            },
+            score_breakdown=breakdown,
             hit_points=data.get("hit_points", []) if isinstance(data.get("hit_points"), list) else [],
             missed_points=data.get("missed_points", []) if isinstance(data.get("missed_points"), list) else [],
             feedback=data.get("feedback", ""),
@@ -225,3 +254,18 @@ def build_closing_chain(llm: BaseChatModel):
         role_title, total_count, covered_topics
     """
     return closing_prompt | llm | StrOutputParser()
+
+
+# ============================================================
+#  Chain: 提示 (渐进式 Hint)
+# ============================================================
+
+def build_hint_chain(llm: BaseChatModel):
+    """构建提示 Chain (渐进式提示, 不泄露完整答案)
+
+    Chain: hint_prompt | llm | StrOutputParser
+
+    输入参数:
+        question, standard_answer, hint_level (1 or 2), candidate_answer
+    """
+    return hint_prompt | llm | StrOutputParser()

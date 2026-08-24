@@ -27,8 +27,7 @@ from typing import Optional, List
 import uvicorn
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 # 将项目根目录加入 sys.path
@@ -42,6 +41,8 @@ import config
 from common import match_role, get_difficulty_label, extract_skills
 from agent.graph import build_interview_graph
 from agent.protocol import command_allowed, phase_error
+from agent.chains import build_hint_chain
+from agent.llm import get_fast_llm
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
@@ -58,9 +59,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# --- 静态目录 ---
-STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 # --- 全局状态 (懒加载检索器) ---
 _retriever: Optional[HybridRetriever] = None
@@ -154,6 +152,10 @@ def get_graph_values(graph, thread_id: str) -> dict:
 
 # --- 进行中面试会话登记（仅当前进程）---
 _sessions: dict = {}
+
+# --- 提示系统追踪 (每 thread 每题的提示使用次数) ---
+# 结构: {thread_id: {question_id: hint_count}}
+_hints: dict = {}
 
 
 # ============================================================
@@ -470,11 +472,19 @@ async def ws_chat(ws: WebSocket):
                         "content": phase_error("answer", phase),
                     })
                     continue
+                
+                # 获取当前题目的提示使用次数
+                current_question = values.get("current_question", {})
+                question_id = current_question.get("id", "")
+                hint_count = 0
+                if thread_id in _hints and question_id in _hints[thread_id]:
+                    hint_count = _hints[thread_id][question_id]
+                
                 action = "end" if answer.lower() in {"quit", "exit", "q"} else "answer"
                 await run_graph_stream(
                     ws,
                     graph,
-                    Command(resume={"action": action, "content": answer}),
+                    Command(resume={"action": action, "content": answer, "hint_count": hint_count}),
                     thread_id,
                 )
 
@@ -521,6 +531,67 @@ async def ws_chat(ws: WebSocket):
                     _sessions[thread_id]["status"] = "ended"
                     _sessions[thread_id]["report_id"] = final_values.get("report_id", "")
 
+            elif msg_type == "hint":
+                if not thread_id:
+                    await ws.send_json({"type": "error", "content": "面试尚未开始"})
+                    continue
+                graph = get_graph()
+                values = get_graph_values(graph, thread_id)
+                phase = values.get("phase", "")
+                if not command_allowed("hint", phase):
+                    await ws.send_json({
+                        "type": "error",
+                        "content": phase_error("hint", phase),
+                    })
+                    continue
+                
+                # 获取当前题目和候选人已回答内容
+                current_question = values.get("current_question", {})
+                question_id = current_question.get("id", "")
+                question_text = current_question.get("question", "")
+                candidate_answer = values.get("main_answer", "") or ""
+                
+                # 获取标准答案
+                retriever = get_retriever()
+                answer_data = retriever.get_answer(question_id)
+                if not answer_data:
+                    await ws.send_json({"type": "error", "content": "无法获取题目信息"})
+                    continue
+                standard_answer = answer_data.get("standard_answer", "")
+                
+                # 追踪提示使用次数
+                if thread_id not in _hints:
+                    _hints[thread_id] = {}
+                if question_id not in _hints[thread_id]:
+                    _hints[thread_id][question_id] = 0
+                
+                hint_count = _hints[thread_id][question_id]
+                if hint_count >= 2:
+                    await ws.send_json({"type": "error", "content": "每题最多使用 2 次提示"})
+                    continue
+                
+                # 生成提示 (hint_level 从 1 开始)
+                hint_level = hint_count + 1
+                try:
+                    hint_chain = build_hint_chain(get_fast_llm())
+                    hint_text = hint_chain.invoke({
+                        "question": question_text,
+                        "standard_answer": standard_answer,
+                        "hint_level": hint_level,
+                        "candidate_answer": candidate_answer or "（尚未回答）",
+                    })
+                    _hints[thread_id][question_id] = hint_count + 1
+                    
+                    await ws.send_json({
+                        "type": "hint",
+                        "content": hint_text,
+                        "hint_level": hint_level,
+                        "question_id": question_id,
+                    })
+                except Exception as e:
+                    logger.exception("生成提示失败: %s", e)
+                    await ws.send_json({"type": "error", "content": "生成提示失败，请重试"})
+
             else:
                 await ws.send_json({"type": "error", "content": f"未知消息类型: {msg_type}"})
 
@@ -532,24 +603,6 @@ async def ws_chat(ws: WebSocket):
             await ws.send_json({"type": "error", "content": "服务器内部错误"})
         except Exception:
             pass
-
-
-# ============================================================
-# 静态文件服务
-# ============================================================
-
-@app.get("/")
-@app.get("/index.html")
-async def serve_index():
-    """首页: 返回 static/index.html (前端构建产物)"""
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.isfile(index_path):
-        return FileResponse(index_path, media_type="text/html")
-    return {"detail": "Not Found", "message": "请将前端文件放入 static/ 目录"}
-
-
-if os.path.isdir(STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 # ============================================================

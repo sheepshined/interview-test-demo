@@ -111,7 +111,7 @@ async def test_low_score_followup_is_combined_and_question_is_not_reemitted(outp
     fast_llm = FakeListChatModel(responses=[
         "欢迎参加面试。",
         "第一题：请解释 Python 事件循环。",
-        score_json(2),
+        score_json(4),
         "你遗漏了关键点，请补充事件循环如何调度任务？",
         score_json(8),
         "第二题：请说明数据库索引的作用。",
@@ -156,7 +156,7 @@ async def test_low_score_followup_is_combined_and_question_is_not_reemitted(outp
     assert state["initial_score"] == 0
     assert len(state["records"]) == 1
     assert state["records"][0]["question_id"] == "q_001"
-    assert state["records"][0]["initial_score"] == 2
+    assert state["records"][0]["initial_score"] == 4
     assert state["records"][0]["score"] == 8
     assert state["records"][0]["followup_answer"] == "任务由事件循环调度"
 
@@ -183,7 +183,7 @@ async def test_low_score_followup_is_combined_and_question_is_not_reemitted(outp
     assert (reports_dir / f"{report_id}.md").is_file()
     radar = json.loads((reports_dir / f"{report_id}.json").read_text(encoding="utf-8"))
     assert [q["question_id"] for q in radar["questions"]] == ["q_001", "q_002"]
-    assert radar["questions"][0]["initial_score"] == 2
+    assert radar["questions"][0]["initial_score"] == 4
     assert radar["questions"][0]["score"] == 8
     assert radar["questions"][0]["had_followup"] is True
     assert graph.get_state(cfg).values["phase"] == "completed"
@@ -228,3 +228,133 @@ async def test_early_end_does_not_create_fake_answer_or_score(output_dirs):
         cfg,
     )
     assert len([e for e in report_events if e.get("type") == "report_ready"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_zero_or_low_score_skips_followup(output_dirs):
+    """完全不会(1-2分)的回答不再触发追问, 直接进入下一题。"""
+    fast_llm = FakeListChatModel(responses=[
+        "欢迎参加面试。",
+        "第一题：请解释 Python 事件循环。",
+        score_json(2),
+        "第二题：请说明数据库索引的作用。",
+        score_json(7),
+        "本次面试结束，感谢参加。",
+    ])
+    strong_llm = FakeListChatModel(responses=["不会被调用"])
+    graph = build_interview_graph(FakeRetriever(), fast_llm, strong_llm).compile(
+        checkpointer=MemorySaver()
+    )
+    cfg = {"configurable": {"thread_id": "test-skip-followup"}}
+
+    await collect_events(graph, {
+        "thread_id": "test-skip-followup",
+        "role_key": "python_dev",
+        "difficulty": 2,
+        "total_count": 2,
+        "resume_context": "",
+        "resume_skills": [],
+    }, cfg)
+
+    # 初始分 2 (<3): 追问不触发, 直接出下一题
+    second_events = await collect_events(
+        graph,
+        Command(resume={"action": "answer", "content": "不知道"}),
+        cfg,
+    )
+    assert stream_ends(second_events, "followup") == []
+    assert [e["question_id"] for e in stream_ends(second_events, "question")] == ["q_002"]
+    state = graph.get_state(cfg).values
+    assert state["main_question_count"] == 1
+    assert len(state["records"]) == 1
+    assert state["records"][0]["question_id"] == "q_001"
+    assert state["records"][0]["initial_score"] == 2
+    assert state["records"][0]["score"] == 2
+    assert state["records"][0].get("followup_question") == ""
+    assert state["records"][0].get("followup_answer") == ""
+    assert state["phase"] == "await_answer"
+
+    # 完整走完: 下一题正常评分, 收尾, 报告可生成
+    closing_events = await collect_events(
+        graph,
+        Command(resume={"action": "answer", "content": "索引加速数据查询"}),
+        cfg,
+    )
+    assert stream_ends(closing_events, "followup") == []
+    assert len(stream_ends(closing_events, "closing")) == 1
+    assert graph.get_state(cfg).values["phase"] == "await_report"
+
+    report_events = await collect_events(
+        graph,
+        Command(resume={"action": "report", "content": ""}),
+        cfg,
+    )
+    assert len([e for e in report_events if e.get("type") == "report_ready"]) == 1
+
+
+# ============================================================
+# 反幻觉: 出题/收尾衔接不可把标准答案或 scorer hit_points 安到候选人头上
+# ============================================================
+
+from agent.graph import _build_prev_context  # noqa: E402
+
+
+def _make_record(score, user_answer, hit_points=None, missed_points=None, question="Q"):
+    return {
+        "question": question,
+        "user_answer": user_answer,
+        "score": score,
+        "hit_points": hit_points or [],
+        "missed_points": missed_points or [],
+    }
+
+
+def test_build_prev_context_low_score_isolates_user_answer():
+    """低分(完全不会)时: 不传 hit/missed 内容, 只给"未答出"信号, 防止 LLM
+    拿标准答案知识点复述成"候选人提到过"。"""
+    state = {"records": [_make_record(
+        score=1,
+        user_answer="不知道",
+        hit_points=["前序遍历"],          # scorer 可能误判的幻觉点
+        missed_points=["层序遍历用队列"],  # 标准答案里的遗漏点
+        question="二叉树遍历有哪些?",
+    )]}
+    ctx = _build_prev_context(state)
+
+    # 候选人原文必须原样出现(垃圾回答就是"不知道", LLM 一眼能判别)
+    assert "不知道" in ctx
+    # 低分提示: 不可虚构
+    assert "过短" in ctx or "跑题" in ctx
+    assert "严禁" in ctx or "不要" in ctx
+    # hit_points 内容不得出现(避免强 LLM 拿来复述成"候选人提到过")
+    assert "前序遍历" not in ctx
+    # missed_points(标准答案遗漏点)内容不得出现
+    assert "层序遍历用队列" not in ctx
+    # 不再有"候选人回答要点"这个幻觉字段
+    assert "候选人回答要点" not in ctx
+
+
+def test_build_prev_context_normal_score_no_low_score_note():
+    """正常分数: 不出现低分提示, 候选人原文独立呈现, 且不回流传评分的 hit/missed。"""
+    state = {"records": [_make_record(
+        score=7,
+        user_answer="前序是根左右, 用递归实现",
+        hit_points=["前序遍历"],       # 评分产出, 不应回流出题链
+        missed_points=["层序遍历"],     # 评分产出, 不应回流出题链
+    )]}
+    ctx = _build_prev_context(state)
+    # 候选人原文呈现
+    assert "前序是根左右" in ctx
+    # 无低分提示
+    assert "过短" not in ctx and "跑题" not in ctx
+    # 数据契约(②): 评分产出(hit/missed)不得回流出题链
+    assert "前序遍历" not in ctx
+    assert "层序遍历" not in ctx
+    assert "命中得分点" not in ctx
+    assert "可衔接方向" not in ctx
+
+
+def test_build_prev_context_first_question():
+    """第一题(无 records): 返回第一题提示。"""
+    ctx = _build_prev_context({"records": []})
+    assert "第一题" in ctx

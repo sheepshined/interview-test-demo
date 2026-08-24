@@ -59,6 +59,18 @@
         </div>
       </div>
 
+      <!-- 学习建议 (新增) -->
+      <div v-if="radar && radar.learning_suggestions && radar.learning_suggestions.length" class="ds-card" style="padding:20px;margin-bottom:24px;">
+        <div style="font-size:15px;font-weight:600;margin:0 0 16px;color:var(--text-primary);">📚 学习建议</div>
+        <div v-for="(item, idx) in radar.learning_suggestions" :key="idx" style="margin-bottom:16px;padding:12px;background:var(--bg-secondary,#f4f4f5);border-radius:8px;border-left:3px solid var(--brand-600);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary);">{{ item.topic }}</div>
+            <div style="font-size:12px;color:var(--text-muted);">{{ item.category }} · {{ item.score }}/10</div>
+          </div>
+          <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;">{{ item.suggestion }}</div>
+        </div>
+      </div>
+
       <!-- 报告内容 -->
       <div class="ds-card" style="padding:24px;margin-bottom:24px;max-height:600px;overflow-y:auto;">
         <div v-if="reportLines.length" style="font-size:14px;line-height:1.9;">

@@ -2,7 +2,7 @@
 retrieval/embeddings.py — Embeddings 工厂 (独立于 agent 包)
 
 将 get_embeddings 从 agent.llm 下沉到 retrieval, 打破 retrieval↔agent 的循环依赖:
-  之前: retrieval.retriever → agent.llm (get_embeddings), 而 agent.engine → retrieval.retriever
+  之前: retrieval.retriever → agent.llm (get_embeddings)，形成反向依赖
   之后: retrieval.* 自持 get_embeddings, 不再反向依赖 agent
 """
 import os

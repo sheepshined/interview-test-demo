@@ -15,9 +15,6 @@ venv/
 node_modules/
 dist/
 
-# 前端构建产物 (集成到 backend/static, 不跟踪)
-backend/static/
-
 # 向量数据库
 backend/chroma_db/
 

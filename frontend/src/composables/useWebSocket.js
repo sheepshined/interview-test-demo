@@ -8,6 +8,92 @@ export function useWebSocket() {
   const streaming = ref(false)
   const threadId = ref('')
   let activeStream = null
+  let revealTimer = null
+
+  // 打字机逐字释放：chunk 先进 pending 缓冲区，定时器按节奏搬到 content。
+  // 积压越多每次吐得越多，保证长文本不会明显拖慢。
+  // ---- TTS 语音朗读 (浏览器原生 SpeechSynthesis, 零成本) ----
+  // 朗读面试官的发言(opening/question/followup/closing), 在打字机吐完字后触发。
+  // 用户可通过 ttsEnabled 开关控制; STT(语音输入)开始时自动停止朗读。
+  const ttsEnabled = ref(true)   // 默认开启, 演示效果佳
+  const ttsSpeaking = ref(false)
+  const _speakableTypes = new Set(['opening', 'question', 'followup', 'closing'])
+
+  function _speakText(text) {
+    if (!ttsEnabled.value) return
+    if (typeof window === 'undefined' || !window.speechSynthesis) return
+    if (!text || !text.trim()) return
+    try {
+      // 停止之前可能残留的朗读
+      window.speechSynthesis.cancel()
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.lang = 'zh-CN'
+      utterance.rate = 0.92   // 稍慢, 更像真人面试官
+      utterance.pitch = 1.0
+      utterance.volume = 1.0
+      utterance.onstart = () => { ttsSpeaking.value = true }
+      utterance.onend = () => { ttsSpeaking.value = false }
+      utterance.onerror = () => { ttsSpeaking.value = false }
+      window.speechSynthesis.speak(utterance)
+    } catch (_) {
+      ttsSpeaking.value = false
+    }
+  }
+
+  function stopTts() {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel()
+    }
+    ttsSpeaking.value = false
+  }
+
+  function toggleTts() {
+    ttsEnabled.value = !ttsEnabled.value
+    if (!ttsEnabled.value) stopTts()
+  }
+
+  const REVEAL_INTERVAL_MS = 24
+  function _revealTick() {
+    if (!activeStream) { _stopReveal(); return }
+    const pending = activeStream.pending || ''
+    if (!pending) {
+      if (activeStream.ended) _finalizeStream()
+      return
+    }
+    const n = pending.length > 80 ? 6 : pending.length > 30 ? 3 : 1
+    activeStream.content += pending.slice(0, n)
+    activeStream.pending = pending.slice(n)
+  }
+  function _startReveal() {
+    if (revealTimer) return
+    revealTimer = window.setInterval(_revealTick, REVEAL_INTERVAL_MS)
+  }
+  function _stopReveal() {
+    if (revealTimer) { window.clearInterval(revealTimer); revealTimer = null }
+  }
+  // 流结束后等 pending 吐完才收尾：置最终文本、解除 streaming（输入解锁）
+  // 收尾后若为面试官发言(opening/question/followup/closing), 触发 TTS 朗读
+  function _finalizeStream() {
+    if (!activeStream) return
+    activeStream.type = activeStream.endType || activeStream.streamType
+    activeStream.content = activeStream.full ?? activeStream.content
+    if (activeStream.endReportId) activeStream.reportId = activeStream.endReportId
+    // TTS: 捕获朗读内容后再清空 activeStream
+    const _ttsType = activeStream.streamType
+    const _ttsContent = activeStream.content || ''
+    activeStream = null
+    streaming.value = false
+    _stopReveal()
+    // 朗读面试官发言(打字机吐完后异步朗读, 不阻塞 UI)
+    if (_speakableTypes.has(_ttsType) && _ttsContent) {
+      _speakText(_ttsContent)
+    }
+  }
+  // 新流到来时若上一段还没吐完，立即补全上一段，避免互相覆盖
+  function _flushStream() {
+    if (!activeStream) return
+    _finalizeStream()
+  }
 
   function connect(timeoutMs = 10000) {
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
@@ -39,6 +125,8 @@ export function useWebSocket() {
         window.clearTimeout(timer)
         connected.value = false
         streaming.value = false
+        stopTts()
+        _stopReveal()
         activeStream = null
         if (!settled) {
           settled = true
@@ -59,31 +147,45 @@ export function useWebSocket() {
         }
 
         if (data.type === 'stream_start') {
+          _flushStream()
           activeStream = reactive({
             type: 'stream_start',
             streamType: data.stream_type,
             content: '',
             full: '',
+            pending: '',
+            ended: false,
             questionId: data.question_id || '',
             questionIndex: data.question_index || 0,
             totalCount: data.total_count || 0,
           })
           messages.value.push(activeStream)
           streaming.value = true
+          // 报告流不走打字机（不在聊天区展示），直接透传
+          if (data.stream_type === 'report') activeStream.instant = true
+          if (!activeStream.instant) _startReveal()
         } else if (data.type === 'stream_chunk') {
           if (activeStream) {
-            activeStream.content += data.content || ''
-            activeStream.full = activeStream.content
+            if (activeStream.instant) {
+              activeStream.content += data.content || ''
+            } else {
+              activeStream.pending += data.content || ''
+            }
           }
         } else if (data.type === 'stream_end') {
           if (activeStream) {
-            activeStream.type = data.stream_type || activeStream.streamType
-            activeStream.full = data.full_text ?? activeStream.content
-            activeStream.content = activeStream.full
-            activeStream.reportId = data.report_id || ''
+            activeStream.endType = data.stream_type || activeStream.streamType
+            activeStream.full = data.full_text ?? (activeStream.content + (activeStream.pending || ''))
+            activeStream.endReportId = data.report_id || ''
+            if (activeStream.instant || !(activeStream.pending || '')) {
+              _finalizeStream()
+            } else {
+              // 还有未吐完的字，交给定时器收尾
+              activeStream.ended = true
+            }
+          } else {
+            streaming.value = false
           }
-          activeStream = null
-          streaming.value = false
         } else if (data.type === 'config_ok') {
           threadId.value = data.thread_id || ''
           messages.value.push({ type: 'config_ok', data })
@@ -103,10 +205,18 @@ export function useWebSocket() {
             reportId: data.report_id,
             content: data.content || '',
           })
+        } else if (data.type === 'hint') {
+          messages.value.push({
+            type: 'hint',
+            content: data.content || '',
+            hintLevel: data.hint_level || 0,
+            questionId: data.question_id || '',
+          })
         } else if (data.type === 'status') {
           messages.value.push({ type: 'status', content: data.content })
         } else if (data.type === 'error') {
           streaming.value = false
+          _stopReveal()
           activeStream = null
           messages.value.push({ type: 'error', content: data.content })
         }
@@ -133,7 +243,9 @@ export function useWebSocket() {
   function sendAnswer(content) { return send({ type: 'answer', content }) }
   function sendEnd() { return send({ type: 'end' }) }
   function requestReport() { return send({ type: 'report' }) }
+  function requestHint() { return send({ type: 'hint' }) }
   function close() {
+    stopTts()
     if (ws.value) ws.value.close()
     ws.value = null
   }
@@ -148,13 +260,18 @@ export function useWebSocket() {
     threadId,
     messages,
     isStreaming,
+    ttsEnabled,
+    ttsSpeaking,
     connect,
     send,
     sendConfig,
     sendAnswer,
     sendEnd,
     requestReport,
+    requestHint,
     close,
     clearMessages,
+    toggleTts,
+    stopTts,
   }
 }

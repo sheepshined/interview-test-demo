@@ -20,6 +20,12 @@ class InterviewState(TypedDict, total=False):
     resume_skills: List[str]
     candidate_name: str
 
+    # ---- 面试官人设 ----
+    # persona_key: 人设键名 (strict_cto / warm_hr / deep_tech)
+    # persona_info: 人设完整信息字典 (name, description, question_style, followup_style)
+    persona_key: str
+    persona_info: Dict
+
     # ---- 面试进度 ----
     asked_ids: List[str]
     asked_categories: List[str]
@@ -47,6 +53,16 @@ class InterviewState(TypedDict, total=False):
     final_result: Dict
     initial_score: int
     final_score: int
+
+    # ---- 自适应难度 ----
+    # streak: 连续表现计数器。≥7分+1, <4分=-1(立即降级), 4-6分=0(重置)
+    # difficulty_changes: 记录每次难度变化的历史(用于报告可视化)
+    streak: int
+    difficulty_changes: List[Dict]
+
+    # ---- 提示系统 ----
+    # hint_count: 当前题目使用的提示次数 (0/1/2)
+    hint_count: int
 
     # ---- 决策 ----
     decision: Dict

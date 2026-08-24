@@ -174,7 +174,7 @@ class KnowledgeBaseBuilder:
         print(f"\n[OK] 知识库构建完成!")
         print(f"  题目总数: {len(questions)}")
         print(f"  ChromaDB: {os.path.abspath(self.chroma_path)}")
-        print(f"  可执行: python main.py chat")
+        print("  下一步: 启动 FastAPI 与 Vite 前端")
 
         # 按角色统计
         role_counts = {}

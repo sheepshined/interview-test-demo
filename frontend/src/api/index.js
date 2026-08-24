@@ -34,9 +34,13 @@ async function request(url, options = {}) {
   } catch (err) {
     clearTimeout(timer)
     if (err.name === 'AbortError') {
-      return { success: false, message: '请求超时，请稍后重试（简历解析较慢，最多需 90 秒）' }
+      return { success: false, status: 0, message: '请求超时，请稍后重试（简历解析较慢，最多需 90 秒）' }
     }
-    return { success: false, message: `网络错误: ${err.message || '无法连接服务器'}` }
+    return {
+      success: false,
+      status: 0,
+      message: '无法连接后端服务，请确认 FastAPI 已在 127.0.0.1:8000 启动',
+    }
   } finally {
     clearTimeout(timer)
   }
@@ -52,7 +56,12 @@ async function request(url, options = {}) {
     }
     return {
       success: false,
-      message: `请求失败 (${res.status})` + (detail ? `: ${detail}` : ''),
+      status: res.status,
+      message: res.status === 404
+        ? '接口不存在（404），请确认启动的是当前项目后端'
+        : res.status === 500 && !detail
+          ? '后端未启动或代理连接失败，请确认 FastAPI 已在 127.0.0.1:8000 启动'
+          : `请求失败 (${res.status})` + (detail ? `: ${detail}` : ''),
     }
   }
 
@@ -64,6 +73,9 @@ async function request(url, options = {}) {
 }
 
 export const getRoles = () => request('/roles')
+
+export const login = (username, password) =>
+  request('/login', { method: 'POST', body: { username, password } })
 
 export const uploadResume = (file) => {
   const fd = new FormData()

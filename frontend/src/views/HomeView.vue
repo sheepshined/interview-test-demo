@@ -44,9 +44,9 @@
     </section>
     <section style="background:var(--bg-200);padding:40px 24px;">
       <div style="max-width:1152px;margin:0 auto;display:flex;justify-content:center;gap:64px;flex-wrap:wrap;">
-        <div style="text-align:center;"><div style="font-family:var(--font-mono);font-size:28px;font-weight:700;letter-spacing:-0.03em;color:var(--text-primary);">10,000+</div><div style="font-size:14px;margin-top:4px;color:var(--text-muted);">模拟面试完成</div></div>
-        <div style="text-align:center;"><div style="font-family:var(--font-mono);font-size:28px;font-weight:700;letter-spacing:-0.03em;color:var(--text-primary);">500+</div><div style="font-size:14px;margin-top:4px;color:var(--text-muted);">涵盖岗位</div></div>
-        <div style="text-align:center;"><div style="font-family:var(--font-mono);font-size:28px;font-weight:700;letter-spacing:-0.03em;color:var(--text-primary);">95%</div><div style="font-size:14px;margin-top:4px;color:var(--text-muted);">用户好评</div></div>
+        <div style="text-align:center;"><div style="font-family:var(--font-mono);font-size:28px;font-weight:700;letter-spacing:-0.03em;color:var(--text-primary);">8</div><div style="font-size:14px;margin-top:4px;color:var(--text-muted);">覆盖岗位方向</div></div>
+        <div style="text-align:center;"><div style="font-family:var(--font-mono);font-size:28px;font-weight:700;letter-spacing:-0.03em;color:var(--text-primary);">86</div><div style="font-size:14px;margin-top:4px;color:var(--text-muted);">精选面试题</div></div>
+        <div style="text-align:center;"><div style="font-family:var(--font-mono);font-size:28px;font-weight:700;letter-spacing:-0.03em;color:var(--text-primary);">4</div><div style="font-size:14px;margin-top:4px;color:var(--text-muted);">维度能力评估</div></div>
       </div>
     </section>
   </div>

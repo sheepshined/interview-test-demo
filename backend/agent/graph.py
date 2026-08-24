@@ -36,6 +36,7 @@ from agent.chains import (
     get_format_instructions,
 )
 from agent.llm import get_fast_llm, get_strong_llm
+from agent.memory import InterviewMemory
 from agent.models import ScoreResult
 from agent.state import InterviewState
 if TYPE_CHECKING:
@@ -71,12 +72,114 @@ async def _stream_chain(
     return full_text
 
 
+def _build_persona_note(state: InterviewState) -> str:
+    """构造面试官人设描述, 注入到出题/追问/开场/收尾 prompt 中。"""
+    persona_info = state.get("persona_info", {})
+    if not persona_info:
+        return ""
+    name = persona_info.get("name", "")
+    description = persona_info.get("description", "")
+    question_style = persona_info.get("question_style", "")
+    followup_style = persona_info.get("followup_style", "")
+    parts = [f"## 你的面试官人设: {name}"]
+    if description:
+        parts.append(description)
+    if question_style:
+        parts.append(f"提问风格: {question_style}")
+    if followup_style:
+        parts.append(f"追问风格: {followup_style}")
+    parts.append("请在整个面试过程中保持这个人设的语气和风格。")
+    return "\n".join(parts)
+
+
 def _band(score: int) -> str:
     if score >= 8:
         return "优秀"
     if score >= 5:
         return "合格"
     return "待加强"
+
+
+def _generate_suggestion(record: Dict) -> str:
+    """根据评分记录生成针对性的学习建议。"""
+    breakdown = record.get("score_breakdown", {})
+    category = record.get("category", "") or "该主题"
+    score = record.get("score", 0)
+    missed = record.get("missed_points", [])
+
+    # 找出最弱的维度
+    dim_labels = {
+        "accuracy": "准确性",
+        "completeness": "完整性",
+        "depth": "深度",
+        "clarity": "清晰度",
+    }
+    weak_dims = []
+    for key, label in dim_labels.items():
+        val = breakdown.get(key, 5)
+        try:
+            if int(val) < 5:
+                weak_dims.append((label, int(val)))
+        except (TypeError, ValueError):
+            pass
+    weak_dims.sort(key=lambda x: x[1])
+
+    parts = []
+    if score <= 2:
+        parts.append(f"建议系统学习「{category}」的基础知识，从概念和原理入手。")
+    elif score <= 4:
+        parts.append(f"建议加深对「{category}」的理解，多做练习巩固。")
+    else:
+        parts.append(f"建议进一步强化「{category}」。")
+
+    if weak_dims:
+        weakest = weak_dims[0][0]
+        tips = {
+            "准确性": "重点核对核心概念的准确定义，避免混淆相近术语",
+            "完整性": "练习时用 checklist 确保覆盖所有关键点",
+            "深度": "尝试解释底层原理和实现细节，而非只停留在表面",
+            "清晰度": "练习用 STAR 或'先结论后细节'的结构化表达",
+        }
+        parts.append(tips.get(weakest, ""))
+
+    if missed:
+        first_missed = missed[0][:30] if isinstance(missed[0], str) else ""
+        if first_missed:
+            parts.append(f"重点补充: {first_missed}")
+
+    return "；".join(filter(None, parts))
+
+
+def _apply_hint_cap(score_result: Dict, hint_count: int) -> Dict:
+    """根据提示使用次数封顶评分。
+
+    规则:
+      0 次提示: 不封顶 (满分 10)
+      1 次提示: 封顶 8 分
+      2 次提示: 封顶 6 分
+    """
+    if hint_count <= 0:
+        return score_result
+    cap = 8 if hint_count == 1 else 6
+    original_score = score_result.get("score", 0)
+    if original_score <= cap:
+        return score_result
+    # 封顶: 按比例缩放四维分数
+    result = dict(score_result)
+    result["score"] = cap
+    result["_hint_capped"] = True
+    result["_original_score"] = original_score
+    breakdown = result.get("score_breakdown", {})
+    if breakdown:
+        scale = cap / original_score if original_score > 0 else 1.0
+        capped_breakdown = {}
+        for key, value in breakdown.items():
+            try:
+                capped_breakdown[key] = max(1, int(float(value) * scale + 0.5))
+            except (TypeError, ValueError):
+                capped_breakdown[key] = value
+        result["score_breakdown"] = capped_breakdown
+    return result
 
 
 def _get_filtered_resume_skills(state: InterviewState) -> List[str]:
@@ -122,23 +225,40 @@ def _select_preferred_category(
 
 
 def _build_prev_context(state: InterviewState) -> str:
+    """构造"上一题回顾"供出题链做承上启下。
+
+    数据契约(②): 出题衔接只读候选人原文 + 表现档位, 不读评分链的
+    hit_points/missed_points。原因: 这些字段是"评分依据", 出题链若
+    接触到会倾向把它们复述成"候选人提到过"——这是幻觉的根源。
+    候选人答得好/差, 面试官从对话原文(history)即可判断, 无需评分链转述。
+    """
     records = state.get("records", [])
     if not records:
         return "（这是第一题，无需衔接上一题）"
     last = records[-1]
-    hit_points = last.get("hit_points", [])
-    missed_points = last.get("missed_points", [])
-    answer_summary = (
-        "、".join(hit_points[:3])
-        if hit_points else last.get("user_answer", "")[:80]
-    )
-    direction = missed_points[0] if missed_points else last.get("question", "")[:40]
+    score = last.get("score", 0)
+    user_answer = (last.get("user_answer", "") or "")[:80] or "（空回答）"
+    # 低分(完全不会/跑题): 额外提示 LLM 不可虚构候选人说过的话
+    if score < 3:
+        return (
+            "## 上一题回顾（用于生成承上启下）\n"
+            f"上一题: {last.get('question', '')[:120]}\n"
+            "候选人回答原文:\n"
+            f"{user_answer}\n"
+            f"表现档位: {_band(score)}\n"
+            "（该回答过短/跑题, 候选人未答出任何有效内容。"
+            "反馈时只能用1句陈述句说明上一题未能作答/偏离题意, "
+            "然后直接引出本题。严禁出现候选人回答里根本不存在的"
+            "技术名词或「候选人提到/说到」等表述）"
+        )
+    # 正常分数: 只给原文 + 档位, 不给 hit/missed(防评分产出回流出题)
     return (
         "## 上一题回顾（用于生成承上启下）\n"
         f"上一题: {last.get('question', '')[:120]}\n"
-        f"候选人回答要点: {answer_summary}\n"
-        f"表现档位: {_band(last.get('score', 0))}\n"
-        f"可衔接方向: {direction}"
+        "候选人回答原文（只有这段文字里出现过的内容，才可被引用为"
+        "「候选人提到过/说过」）:\n"
+        f"{user_answer}\n"
+        f"表现档位: {_band(score)}"
     )
 
 
@@ -178,10 +298,14 @@ def _append_to_md(state: InterviewState, record: Dict) -> None:
 def _normalise_resume(value, default_action: str) -> dict:
     """兼容旧字符串 resume 值，同时优先使用结构化 action/content。"""
     if isinstance(value, dict):
-        return {
+        result = {
             "action": str(value.get("action") or default_action),
             "content": str(value.get("content") or "").strip(),
         }
+        # 透传 hint_count (提示系统使用)
+        if "hint_count" in value:
+            result["hint_count"] = int(value.get("hint_count") or 0)
+        return result
     return {"action": default_action, "content": str(value or "").strip()}
 
 
@@ -199,6 +323,21 @@ def build_interview_graph(
     opening_chain = build_opening_chain(fast_llm)
     closing_chain = build_closing_chain(fast_llm)
     summary_chain = build_summary_chain(strong_llm)
+    # 报告兜底链: 强模型不可用时降级用快速模型生成 AI 评价(见 summary_node)
+    summary_fallback_chain = build_summary_chain(fast_llm)
+
+    # ---- 对话记忆(进程内, 按 thread_id 隔离) ----
+    # InterviewMemory 不可序列化, 不进 InterviewState(否则 checkpointer 报错)。
+    # 作为闭包字典管理; 当前 MemorySaver 亦为进程内, ③ 接 SqliteSaver 时
+    # 再统一解决持久化。fast_llm 用于压缩摘要。
+    _memories: Dict[str, InterviewMemory] = {}
+
+    def _get_memory(state: InterviewState) -> InterviewMemory:
+        """按 thread_id 获取(或创建)对话记忆。"""
+        tid = state.get("thread_id", "default")
+        if tid not in _memories:
+            _memories[tid] = InterviewMemory(llm=fast_llm)
+        return _memories[tid]
 
     def score_candidate(state: InterviewState, candidate_answer: str) -> Dict:
         question = state.get("current_question") or {}
@@ -290,6 +429,13 @@ def build_interview_graph(
         except OSError as exc:
             logger.warning("初始化记录文件失败: %s", exc)
 
+        # 随机选择面试官人设
+        persona_keys = list(config.INTERVIEWER_PERSONAS.keys())
+        persona_key = state.get("persona_key") or random.choice(persona_keys)
+        if persona_key not in config.INTERVIEWER_PERSONAS:
+            persona_key = random.choice(persona_keys)
+        persona_info = config.INTERVIEWER_PERSONAS[persona_key]
+
         return {
             "role_key": role_key,
             "role_info": role_info,
@@ -307,6 +453,10 @@ def build_interview_graph(
             "phase": "configured",
             "force_end": False,
             "report_id": "",
+            "streak": 0,
+            "difficulty_changes": [],
+            "persona_key": persona_key,
+            "persona_info": persona_info,
         }
 
     async def opening_node(state: InterviewState) -> dict:
@@ -317,7 +467,7 @@ def build_interview_graph(
         else:
             tags = state["role_info"].get("tags", [])
             first_hint = random.choice(tags) if tags else state["role_info"]["title"]
-        await _stream_chain(
+        opening_text = await _stream_chain(
             writer,
             opening_chain,
             {
@@ -326,9 +476,13 @@ def build_interview_graph(
                 "total_count": state["total_count"],
                 "candidate_name": state.get("candidate_name") or "你",
                 "first_direction": first_hint,
+                "persona_note": _build_persona_note(state),
             },
             "opening",
         )
+        # 开场白入记忆(作为 AI 的首轮发言)
+        memory = _get_memory(state)
+        memory.add_ai_message(opening_text)
         return {"first_topic_hint": first_hint, "phase": "preparing_question"}
 
     def prepare_question_node(state: InterviewState) -> dict:
@@ -431,11 +585,15 @@ def build_interview_graph(
                 "question_text": question["question"],
                 "resume_section": resume_section,
                 "prev_context": _build_prev_context(state),
-                "history": [],
+                "history": _get_memory(state).get_history_for_chain(),
+                "persona_note": _build_persona_note(state),
             },
             "question",
             metadata,
         )
+        # 出题文本入记忆(作为 AI 发言, 供后续轮次衔接)
+        memory = _get_memory(state)
+        memory.add_ai_message(rendered)
         return {"rendered_question": rendered, "phase": "await_answer"}
 
     def wait_answer_node(state: InterviewState) -> dict:
@@ -445,12 +603,17 @@ def build_interview_graph(
             "question_index": state.get("question_index", 0),
         })
         payload = _normalise_resume(value, "answer")
+        content = payload["content"]
+        # 候选人回答入记忆(作为 HumanMessage)
+        if content:
+            _get_memory(state).add_user_message(content)
         return {
             "input_action": payload["action"],
-            "main_answer": payload["content"],
-            "human_answer": payload["content"],
+            "main_answer": content,
+            "human_answer": content,
             "phase": "answer_received",
             "force_end": payload["action"] == "end",
+            "hint_count": payload.get("hint_count", 0),
         }
 
     def wait_answer_router(state: InterviewState) -> str:
@@ -458,6 +621,9 @@ def build_interview_graph(
 
     def score_initial_node(state: InterviewState) -> dict:
         result = score_candidate(state, state.get("main_answer", ""))
+        # 提示封顶: 1次提示最高8分, 2次最高6分
+        hint_count = state.get("hint_count", 0)
+        result = _apply_hint_cap(result, hint_count)
         score = result.get("score", 0)
         return {
             "initial_result": result,
@@ -468,11 +634,16 @@ def build_interview_graph(
         }
 
     def initial_score_router(state: InterviewState) -> str:
-        if state.get("initial_result", {}).get("score", 0) < 5:
+        # 追问分档: 3-6 分(部分正确, 值得深挖)才追问; <3(完全不会/跑题)与 >=7(已答好)直接下一题
+        score = state.get("initial_result", {}).get("score", 0)
+        if 3 <= score < 7:
             return "prepare_followup"
         return "finalize_question"
 
     def prepare_followup_node(state: InterviewState) -> dict:
+        # 数据契约(②): 追问属"同题内深挖", 可读评分产出(missed/hit/reference)
+        # 作为追问方向依据——这与出题衔接"跨题不读评分产出"的约束不同。
+        # 但追问 prompt 规则8已约束: 这些字段禁当作"候选人说过"来复述。
         initial = state.get("initial_result", {})
         missed_points = initial.get("missed_points", [])
         question = state.get("current_question", {})
@@ -501,7 +672,8 @@ def build_interview_graph(
             "hit_points": "、".join(initial.get("hit_points", [])) or "无",
             "missed_topic": missed_topic,
             "reference_knowledge": "\n---\n".join(knowledge) or "无参考知识",
-            "history": [],
+            "history": _get_memory(state).get_history_for_chain(),
+            "persona_note": _build_persona_note(state),
         }
         return {"followup_context": context, "phase": "followup_prepared"}
 
@@ -522,9 +694,11 @@ def build_interview_graph(
         writer({
             "type": "decision",
             "action": "followup",
-            "reason": "初始得分低于 5 分，进行一次针对性追问",
+            "reason": "初始得分部分正确，进行一次针对性追问",
             **metadata,
         })
+        # 追问文本入记忆(作为 AI 发言)
+        _get_memory(state).add_ai_message(followup_text)
         return {"followup_question": followup_text, "phase": "await_followup"}
 
     def wait_followup_node(state: InterviewState) -> dict:
@@ -534,10 +708,14 @@ def build_interview_graph(
             "question_index": state.get("question_index", 0),
         })
         payload = _normalise_resume(value, "answer")
+        content = payload["content"]
+        # 候选人补充回答入记忆
+        if content:
+            _get_memory(state).add_user_message(content)
         return {
             "input_action": payload["action"],
-            "followup_answer": payload["content"],
-            "human_answer": payload["content"],
+            "followup_answer": content,
+            "human_answer": content,
             "phase": "followup_received",
             "force_end": payload["action"] == "end",
         }
@@ -548,12 +726,15 @@ def build_interview_graph(
         return "score_combined"
 
     def score_combined_node(state: InterviewState) -> dict:
+        # 只拼接候选人自己的两段回答, 不把追问问题文本混进去, 避免评分模型把追问中的提示性内容算给候选人
         combined_answer = (
             f"原始回答：{state.get('main_answer', '')}\n\n"
-            f"针对追问“{state.get('followup_question', '')}”的补充回答："
-            f"{state.get('followup_answer', '')}"
+            f"补充回答：{state.get('followup_answer', '')}"
         )
         result = score_candidate(state, combined_answer)
+        # 提示封顶: 1次提示最高8分, 2次最高6分
+        hint_count = state.get("hint_count", 0)
+        result = _apply_hint_cap(result, hint_count)
         return {
             "final_result": result,
             "final_score": result.get("score", 0),
@@ -580,12 +761,65 @@ def build_interview_graph(
             **result,
             "category": answer_data.get("category") or question.get("category", ""),
             "difficulty": answer_data.get("difficulty") or question.get("difficulty", 2),
+            "difficulty_at_time": state.get("difficulty", 2),  # 出题时的实际难度
+            "hints_used": state.get("hint_count", 0),  # 提示使用次数
             "is_followup": False,
             "round": completed,
         }
         records = list(state.get("records", [])) + [record]
         next_state = {**state, "records": records}
         _append_to_md(next_state, record)
+
+        # ---- 自适应难度 (streak-based adaptive difficulty) ----
+        # 借鉴 InterviewGenerator 的连击驱动模式:
+        #   得分≥7 → streak+1, 连续2次≥7 → 难度+1
+        #   得分<4 → streak=-1, 立即难度-1(不等连续)
+        #   4-6分 → streak=0(重置), 保持当前难度
+        # 难度范围锁定 1-3, 避免极端振荡
+        score = result.get("score", 0)
+        old_streak = state.get("streak", 0)
+        old_difficulty = state.get("difficulty", 2)
+        difficulty_changes = list(state.get("difficulty_changes", []))
+
+        if score >= 7:
+            new_streak = old_streak + 1
+        elif score < 4:
+            new_streak = -1
+        else:
+            new_streak = 0
+
+        new_difficulty = old_difficulty
+        change_reason = ""
+
+        if new_streak >= 2 and old_difficulty < 3:
+            consecutive = new_streak  # 捕获连击数(此时 new_streak 还没被重置)
+            new_difficulty = old_difficulty + 1
+            new_streak = 0
+            change_reason = (
+                f"连续 {consecutive} 题得分≥7, 难度提升: "
+                f"{config.DIFFICULTY_LABELS[old_difficulty]} → "
+                f"{config.DIFFICULTY_LABELS[new_difficulty]}"
+            )
+        elif new_streak == -1 and old_difficulty > 1:
+            new_difficulty = old_difficulty - 1
+            new_streak = 0
+            change_reason = (
+                f"得分 {score}<4, 难度降低: "
+                f"{config.DIFFICULTY_LABELS[old_difficulty]} → "
+                f"{config.DIFFICULTY_LABELS[new_difficulty]}"
+            )
+
+        if new_difficulty != old_difficulty:
+            difficulty_changes.append({
+                "round": completed,
+                "from": old_difficulty,
+                "to": new_difficulty,
+                "from_label": config.DIFFICULTY_LABELS[old_difficulty],
+                "to_label": config.DIFFICULTY_LABELS[new_difficulty],
+                "score": score,
+                "reason": change_reason,
+            })
+
         should_end = state.get("force_end", False) or completed >= state.get("total_count", 5)
         decision = {
             "action": "end" if should_end else "next",
@@ -598,11 +832,20 @@ def build_interview_graph(
                 )
             ),
         }
+        # 难度变化时追加到 decision reason, 前端可直接展示
+        if change_reason:
+            decision["difficulty_change"] = change_reason
+        # 每轮结束后触发记忆压缩(超阈值时旧消息过 compress_prompt 压成摘要)
+        _get_memory(state).maybe_compress()
         return {
             "records": records,
             "main_question_count": completed,
             "decision": decision,
             "phase": "question_finalized",
+            "streak": new_streak,
+            "difficulty": new_difficulty,
+            "difficulty_label": config.DIFFICULTY_LABELS[new_difficulty],
+            "difficulty_changes": difficulty_changes,
         }
 
     def finalize_router(state: InterviewState) -> str:
@@ -618,6 +861,16 @@ def build_interview_graph(
             for record in records if record.get("question")
         ]
         last = records[-1] if records else {}
+        last_score = last.get("score", 0)
+        last_answer = (last.get("user_answer", "") or "")[:80] or "（空回答）"
+        # 低分(完全不会/跑题): 不传 hit/missed 内容, 避免 LLM 拿标准答案
+        # 知识点复述成"候选人讲到了"。只给"未答出有效内容"的信号。
+        if last_score < 3:
+            last_hit = "无（候选人未答出有效内容, 禁止当作候选人说过）"
+            last_missed = "无（候选人未答出有效内容, 禁止当作候选人说过）"
+        else:
+            last_hit = "、".join(last.get("hit_points", [])) or "无"
+            last_missed = "、".join(last.get("missed_points", [])) or "无"
         await _stream_chain(
             writer,
             closing_chain,
@@ -626,9 +879,11 @@ def build_interview_graph(
                 "total_count": state.get("main_question_count", 0),
                 "covered_topics": "\n".join(topics) or "（无已完成题目）",
                 "last_question": last.get("question", "")[:120],
-                "last_band": _band(last.get("score", 0)),
-                "last_hit": "、".join(last.get("hit_points", [])) or "无",
-                "last_missed": "、".join(last.get("missed_points", [])) or "无",
+                "last_band": _band(last_score),
+                "last_answer": last_answer,
+                "last_hit": last_hit,
+                "last_missed": last_missed,
+                "persona_note": _build_persona_note(state),
             },
             "closing",
         )
@@ -693,6 +948,9 @@ def build_interview_graph(
         strengths = [record for record in records if record.get("score", 0) >= 7]
         weaknesses = [record for record in records if record.get("score", 0) < 5]
         ai_text = ""
+        # AI 评价生成模式: strong=强模型正常, fast_fallback=降级快速模型,
+        # template=双模型均失败, 纯模板。写入报告与雷达 JSON 供前端标识。
+        ai_summary_mode = "none"
         ai_header = "## AI 综合评价 (LangGraph)\n\n"
         writer({"type": "stream_start", "stream_type": "report"})
         writer({"type": "stream_chunk", "content": structured + "\n\n"})
@@ -712,26 +970,50 @@ def build_interview_graph(
                     f"清晰度={breakdown.get('clarity', '?')}\n"
                     f"  点评: {record.get('feedback', '')[:120]}"
                 )
+            summary_input = {
+                "role_title": state["role_info"]["title"],
+                "difficulty_label": state["difficulty_label"],
+                "avg_score": average,
+                "total_questions": len(records),
+                "high_score_count": len(strengths),
+                "low_score_count": len(weaknesses),
+                "score_details": "\n\n".join(score_details),
+            }
             try:
-                async for chunk in summary_chain.astream({
-                    "role_title": state["role_info"]["title"],
-                    "difficulty_label": state["difficulty_label"],
-                    "avg_score": average,
-                    "total_questions": len(records),
-                    "high_score_count": len(strengths),
-                    "low_score_count": len(weaknesses),
-                    "score_details": "\n\n".join(score_details),
-                }):
+                async for chunk in summary_chain.astream(summary_input):
                     ai_text += chunk
                     writer({"type": "stream_chunk", "content": chunk})
+                ai_summary_mode = "strong"
             except Exception as exc:
-                level = "通过" if average >= 7 else ("待定" if average >= 5 else "不通过")
-                ai_text = (
-                    f"**总体评价**: 候选人平均得分 {average:.1f}/10。\n\n"
-                    f"**面试结论**: {level}\n\n"
-                    f"（AI 分析生成失败: {exc}）"
-                )
-                writer({"type": "stream_chunk", "content": ai_text})
+                # 兜底一级: 强模型失败 → 降级快速模型重试 (同一 prompt)
+                logger.warning("强模型总结失败, 降级快速模型重试: %s", exc)
+                writer({
+                    "type": "stream_chunk",
+                    "content": "\n\n> ⚠️ 评价生成服务波动，正在切换备用模型…\n\n",
+                })
+                try:
+                    ai_text = ""
+                    async for chunk in summary_fallback_chain.astream(summary_input):
+                        ai_text += chunk
+                        writer({"type": "stream_chunk", "content": chunk})
+                    ai_text += "\n\n> ⚠️ 本评价由备用模型生成（降级模式）"
+                    writer({
+                        "type": "stream_chunk",
+                        "content": "\n\n> ⚠️ 本评价由备用模型生成（降级模式）",
+                    })
+                    ai_summary_mode = "fast_fallback"
+                except Exception as exc2:
+                    # 兜底二级: 双模型均失败 → 模板文字 + 显式降级标注
+                    logger.warning("备用模型总结亦失败, 使用模板兜底: %s", exc2)
+                    level = "通过" if average >= 7 else ("待定" if average >= 5 else "不通过")
+                    ai_text = (
+                        f"**总体评价**: 候选人平均得分 {average:.1f}/10。\n\n"
+                        f"**面试结论**: {level}\n\n"
+                        f"> ⚠️ 降级模式：AI 综合评价生成失败（{exc2}），"
+                        "以上结论仅基于分数规则，详细逐题数据见上表。"
+                    )
+                    writer({"type": "stream_chunk", "content": ai_text})
+                    ai_summary_mode = "template"
 
         footer = (
             "\n\n---\n\n## 每道题完整记录\n"
@@ -784,6 +1066,7 @@ def build_interview_graph(
                 "avg_score": round(average, 1),
                 "total_questions": len(records),
                 "timestamp": timestamp,
+                "ai_summary_mode": ai_summary_mode,
                 "dimensions": dimensions,
                 "categories": [
                     {
@@ -803,11 +1086,23 @@ def build_interview_graph(
                         "max_score": record.get("max_score", 10),
                         "category": record.get("category", ""),
                         "had_followup": bool(record.get("followup_question")),
+                        "difficulty_at_time": record.get("difficulty_at_time", 2),
+                        "hints_used": record.get("hints_used", 0),
                     }
                     for index, record in enumerate(records, 1)
                 ],
                 "strengths": [record.get("question", "")[:40] for record in strengths],
                 "weaknesses": [record.get("question", "")[:40] for record in weaknesses],
+                "difficulty_changes": state.get("difficulty_changes", []),
+                "learning_suggestions": [
+                    {
+                        "topic": record.get("question", "")[:40],
+                        "category": record.get("category", "") or "通用",
+                        "score": record.get("score", 0),
+                        "suggestion": _generate_suggestion(record),
+                    }
+                    for record in weaknesses
+                ],
             }
             with open(radar_path, "w", encoding="utf-8") as handle:
                 json.dump(radar, handle, ensure_ascii=False, indent=2)

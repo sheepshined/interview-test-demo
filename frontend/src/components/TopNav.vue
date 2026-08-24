@@ -22,8 +22,9 @@
 
 <script setup>
 import { useRouter } from 'vue-router'
+import { clearAuth, getUsername } from '../auth'
 defineProps({ backText: { type: String, default: '' } })
 const router = useRouter()
-const username = localStorage.getItem('username') || '访客'
-function handleLogout() { localStorage.removeItem('token'); localStorage.removeItem('username'); router.push('/login') }
+const username = getUsername()
+function handleLogout() { clearAuth(); router.push('/login') }
 </script>

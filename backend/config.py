@@ -44,13 +44,18 @@ RRF_K = 60              # Reciprocal Rank Fusion 参数
 EMBEDDING_MODEL_PATH = os.getenv(
     "LOCAL_BGE_MODEL_PATH", "BAAI/bge-base-zh-v1.5"
 )
-# 在线 Embedding 回退开关 (True 时优先使用智谱 embedding-2, 免本地模型加载)
-EMBEDDING_ONLINE = os.getenv("EMBEDDING_ONLINE", "false").lower() == "true"
 
 # ==================== LLM 配置 ====================
 # API Key 优先读 LLM_API_KEY, 向后兼容 DEEPSEEK_API_KEY
 LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
+
+# ---- 视觉模型 (千问 qwen-vl, 扫描件简历解析兜底; 未配置 Key 则该路径自动禁用) ----
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+VISION_MODEL = os.getenv("VISION_MODEL", "qwen-vl-plus")
+VISION_BASE_URL = os.getenv(
+    "VISION_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+)
 
 # 模型分层 (阶段3): fast=出题/评分/追问/开场/收尾(求速度), strong=总结报告(求质量)
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")               # 兼容旧引用
@@ -116,6 +121,43 @@ ROLES = {
         "title": "数据分析师",
         "tags": ["SQL", "Python", "统计", "数据分析", "可视化"],
         "file": "data_analyst.md",
+    },
+}
+
+# ==================== 面试官人设 ====================
+# 每种人设定义了面试官的性格、提问风格和追问偏好。
+# configure_node 会随机选择一种人设注入到出题/追问/开场/收尾 prompt 中。
+INTERVIEWER_PERSONAS = {
+    "strict_cto": {
+        "name": "严谨CTO",
+        "description": (
+            "你是一位严谨、高标准的技术 CTO。你注重技术深度和底层原理，"
+            "对模糊或表面的回答不满意，会直接指出不足。"
+            "你的语气专业但略显严肃，提问简洁有力，追问直切要害。"
+            "你期望候选人能展示真正的技术理解，而不只是背诵概念。"
+        ),
+        "question_style": "提问直接，不寒暄，直奔技术核心。偏好追问'为什么'和'底层原理'。",
+        "followup_style": "追问犀利，会针对回答中的模糊点直接质疑。",
+    },
+    "warm_hr": {
+        "name": "温和HR",
+        "description": (
+            "你是一位温和、善于沟通的 HR 面试官。你注重候选人的表达能力、"
+            "团队协作和职业态度。你的语气友善亲切，会用鼓励性的语言引导候选人。"
+            "即使候选人回答不够完美，你也会先肯定做得好的部分，再温和提出改进方向。"
+        ),
+        "question_style": "提问自然流畅，会用'聊聊''分享'等亲和词汇。关注项目经验和软技能。",
+        "followup_style": "追问温和，先肯定再引导，鼓励候选人展开。",
+    },
+    "deep_tech": {
+        "name": "技术深挖型",
+        "description": (
+            "你是一位好奇心极强、喜欢深挖技术细节的资深工程师。"
+            "你对每个话题都想了解更多，会连续追问'还有呢''具体怎么实现''举个例子'。"
+            "你的语气充满好奇但不会让人觉得被审问，更像一场深入的技术对话。"
+        ),
+        "question_style": "提问喜欢从实际场景出发，偏好'你在项目中遇到过XX问题吗'。",
+        "followup_style": "追问层层递进，从概念→实现→优化→边界情况。",
     },
 }
 
