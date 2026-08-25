@@ -122,6 +122,11 @@ ROLES = {
         "tags": ["SQL", "Python", "统计", "数据分析", "可视化"],
         "file": "data_analyst.md",
     },
+    "llm_app": {
+        "title": "大模型应用开发工程师",
+        "tags": ["Agent", "RAG", "大模型", "Prompt工程", "向量检索", "工具调用", "Embedding", "LangChain"],
+        "file": "llm_app.md",
+    },
 }
 
 # ==================== 面试官人设 ====================

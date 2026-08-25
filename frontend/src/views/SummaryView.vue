@@ -71,6 +71,24 @@
         </div>
       </div>
 
+      <!-- 好答案 vs 差答案对比 (新增) -->
+      <div v-if="radar && radar.questions && radar.questions.some(q => q.good_points && q.good_points.length)" class="ds-card" style="padding:20px;margin-bottom:24px;">
+        <div style="font-size:15px;font-weight:600;margin:0 0 16px;color:var(--text-primary);">🆚 好答案 vs 差答案</div>
+        <div v-for="(q, idx) in radar.questions.filter(q => q.good_points && q.good_points.length)" :key="idx" style="padding-bottom:20px;border-bottom:1px solid var(--border-default);margin-bottom:16px;">
+          <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">第 {{ q.round }} 题 · {{ q.question }}</div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:240px;padding:12px;background:#f0fdf4;border-left:3px solid #16a34a;border-radius:8px;">
+              <div style="font-size:12px;font-weight:600;color:#16a34a;margin-bottom:6px;">✅ 高分答案特征</div>
+              <div v-for="p in q.good_points" :key="p" style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;margin-bottom:3px;">{{ p }}</div>
+            </div>
+            <div v-if="q.bad_points && q.bad_points.length" style="flex:1;min-width:240px;padding:12px;background:#fef2f2;border-left:3px solid #dc2626;border-radius:8px;">
+              <div style="font-size:12px;font-weight:600;color:#dc2626;margin-bottom:6px;">❌ 低分踩坑特征</div>
+              <div v-for="p in q.bad_points" :key="p" style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;margin-bottom:3px;">{{ p }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 报告内容 -->
       <div class="ds-card" style="padding:24px;margin-bottom:24px;max-height:600px;overflow-y:auto;">
         <div v-if="reportLines.length" style="font-size:14px;line-height:1.9;">

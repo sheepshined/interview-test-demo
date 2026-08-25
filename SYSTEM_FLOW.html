@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 模拟面试官 · 系统流程图 (v0.4)</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #171a23; --border: #2a2f3d;
+    --text: #e6e9f0; --muted: #8b93a7;
+    --brand: #6c8cff; --brand-bg: rgba(108,140,255,.12);
+    --green: #34d399; --green-bg: rgba(52,211,153,.12);
+    --yellow: #fbbf24; --yellow-bg: rgba(251,191,36,.12);
+    --red: #f87171; --red-bg: rgba(248,113,113,.12);
+    --purple: #a78bfa; --purple-bg: rgba(167,139,250,.12);
+    --cyan: #22d3ee; --cyan-bg: rgba(34,211,238,.12);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; padding: 32px 16px; }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 28px; font-size: 12px; color: var(--muted); }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+  .lane { display: flex; gap: 16px; margin-bottom: 24px; }
+  .lane-label { writing-mode: vertical-rl; text-orientation: mixed; font-size: 12px; letter-spacing: 2px; color: var(--muted); display: flex; align-items: center; justify-content: center; padding: 8px 6px; border-radius: 8px; }
+  .lane-flow { flex: 1; display: flex; flex-wrap: wrap; gap: 12px; align-content: flex-start; }
+
+  .node { border-radius: 10px; padding: 12px 16px; font-size: 13px; min-width: 150px; max-width: 220px; border: 1px solid var(--border); background: var(--surface); position: relative; }
+  .node .title { font-weight: 600; font-size: 14px; margin-bottom: 3px; }
+  .node .desc { color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+  .node .badge { position: absolute; top: -7px; right: -7px; font-size: 10px; padding: 2px 7px; border-radius: 20px; font-weight: 600; }
+  .node.interrupt { border-color: var(--purple); background: var(--purple-bg); }
+  .node.interrupt .title { color: var(--purple); }
+  .node.llm { border-color: var(--cyan); background: var(--cyan-bg); }
+  .node.llm .title { color: var(--cyan); }
+  .node.decision { border-color: var(--yellow); background: var(--yellow-bg); }
+  .node.decision .title { color: var(--yellow); }
+  .node.new { border-color: var(--green); background: var(--green-bg); }
+  .node.new .title { color: var(--green); }
+  .node.new .badge { background: var(--green); color: #06281c; }
+  .node.start-end { border-color: var(--red); background: var(--red-bg); }
+  .node.start-end .title { color: var(--red); }
+  .node.frontend { border-style: dashed; }
+
+  .group { width: 100%; font-size: 11px; color: var(--muted); letter-spacing: 1px; margin: 8px 0 4px; text-transform: uppercase; }
+  .edge-note { font-size: 11px; color: var(--yellow); background: var(--yellow-bg); border: 1px dashed var(--yellow); border-radius: 8px; padding: 10px 14px; max-width: 280px; }
+  .edge-note .t { font-weight: 600; margin-bottom: 2px; }
+  .edge-note .d { color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+  .ws { margin-top: 30px; }
+  .ws .flow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 12px; }
+  .ws .msg { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-family: Consolas, monospace; font-size: 11.5px; color: var(--brand); }
+  .ws .msg.client { color: var(--green); }
+  .ws .arrow { color: var(--muted); font-size: 16px; }
+  .ws .tag { font-size: 11px; color: var(--muted); }
+
+  .foot { margin-top: 34px; color: var(--muted); font-size: 12px; line-height: 1.8; border-top: 1px solid var(--border); padding-top: 16px; }
+  .foot b { color: var(--text); }
+  @media (max-width: 800px) { .lane { flex-direction: column; } .lane-label { writing-mode: horizontal-tb; padding: 4px 12px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎓 AI 模拟面试官 · 系统逻辑流程图</h1>
+  <div class="sub">v0.4 · LangGraph 14 节点状态图 + WebSocket 人在回路 · 绿框 = 本次新增优化</div>
+
+  <div class="legend">
+    <span><span class="dot" style="background:var(--purple)"></span> interrupt 等待节点</span>
+    <span><span class="dot" style="background:var(--cyan)"></span> LLM 生成节点</span>
+    <span><span class="dot" style="background:var(--yellow)"></span> 条件路由</span>
+    <span><span class="dot" style="background:var(--green)"></span> 本次新增 (v0.4)</span>
+    <span><span class="dot" style="background:var(--red)"></span> 起止节点</span>
+    <span><span class="dot" style="background:var(--surface);border:1px solid var(--border)"></span> 普通节点</span>
+  </div>
+
+  <!-- ============ 后端: LangGraph 流程 ============ -->
+  <div class="lane">
+    <div class="lane-label" style="background:rgba(108,140,255,.08)">后端 LangGraph</div>
+    <div class="lane-flow">
+
+      <div class="group">▍面试启动</div>
+
+      <div class="node start-end"><div class="title">START</div><div class="desc">WebSocket 收到 config 消息</div></div>
+      <div class="node">
+        <div class="title">① configure 初始化</div>
+        <div class="desc">岗位 / 难度 / 题量校验；<b>随机分配面试官人设</b>（严谨CTO/温和HR/深挖型）；初始化 streak=0、记录文件</div>
+      </div>
+      <div class="node llm">
+        <div class="title">② opening 开场白</div>
+        <div class="desc">LLM 生成开场白（注入人设）→ 流式推送 + TTS 朗读 → 写入对话记忆</div>
+      </div>
+      <div class="node new" style="max-width:190px">
+        <div class="title">①.5 人设分配</div>
+        <div class="desc">random.choice(3种人设) 注入出题/追问/开场/收尾 prompt</div>
+        <span class="badge">NEW</span>
+      </div>
+
+      <div class="group">▍出题循环</div>
+
+      <div class="node">
+        <div class="title">③ prepare_question 选题</div>
+        <div class="desc">简历技能筛选 + 分类偏好 + 排除已问；<b>按当前自适应难度</b>检索 (BM25+向量+RRF)</div>
+      </div>
+      <div class="node decision"><div class="title">⑬ 自适应难度</div><div class="desc">连续2题≥7分 → 难度+1；<4分 → 立即-1；4-6分重置连击；记录到 difficulty_changes</div></div>
+      <div class="node llm">
+        <div class="title">④ emit_question 出题</div>
+        <div class="desc">上一题回顾 + 对话记忆 + 人设 → LLM 流式生成 → 打字机 + TTS 朗读</div>
+      </div>
+      <div class="node interrupt">
+        <div class="title">⑤ wait_answer 等回答</div>
+        <div class="desc">interrupt() 暂停；期间可收到 answer / hint / end 命令</div>
+      </div>
+
+      <div class="group">▍评分与追问</div>
+
+      <div class="node llm">
+        <div class="title">⑥ score_initial 初步评分</div>
+        <div class="desc">四维评分(准确/完整/深度/清晰) + 均值校准；<b>按 hint 次数封顶</b>(1次→8分, 2次→6分)</div>
+      </div>
+      <div class="node decision">
+        <div class="title">⑦ 追问分档路由</div>
+        <div class="desc">3 ≤ 分 < 7 → 追问<br>&lt; 3 或 ≥ 7 → 直接下一题</div>
+      </div>
+      <div class="node llm">
+        <div class="title">⑧ prepare+emit_followup 追问</div>
+        <div class="desc">读评分产出定追问方向（禁当候选人说过）→ 流式追问 + TTS</div>
+      </div>
+      <div class="node interrupt">
+        <div class="title">⑨ wait_followup 等补充</div>
+        <div class="desc">interrupt() 暂停；期间可收到 answer / hint / end</div>
+      </div>
+      <div class="node llm">
+        <div class="title">⑩ score_combined 合并评分</div>
+        <div class="desc">只拼候选人两段回答重评（防提示词加分幻觉）+ hint 封顶</div>
+      </div>
+
+      <div class="group">▍收尾与报告</div>
+
+      <div class="node">
+        <div class="title">⑪ finalize_question 归档</div>
+        <div class="desc">写入记录文件 + 触发记忆压缩 + 更新 streak/难度 + 判断是否结束</div>
+      </div>
+      <div class="node llm">
+        <div class="title">⑫ closing 收尾</div>
+        <div class="desc">LLM 收尾语（人设+反幻觉约束）→ 推送 interview_ended 事件</div>
+      </div>
+      <div class="node interrupt">
+        <div class="title">⑭ wait_report 等指令</div>
+        <div class="desc">interrupt() 暂停；收到 report 命令才继续</div>
+      </div>
+      <div class="node llm">
+        <div class="title">⑮ summary 生成报告</div>
+        <div class="desc">强模型总结（降级链：strong→fast→模板）+ 雷达JSON + <b>学习建议生成</b></div>
+      </div>
+      <div class="node start-end"><div class="title">END</div><div class="desc">report_ready 推送 → 前端跳转报告页</div></div>
+
+      <div class="edge-note">
+        <div class="t">🧭 条件边汇总</div>
+        <div class="d">
+          ③→④：有题则出题，题库耗尽→收尾<br>
+          ⑤→⑥：收到回答→评分；收到 end→收尾<br>
+          ⑦：3≤分&lt;7→追问；否则→归档<br>
+          ⑨：收到补充→合并评分；end→归档<br>
+          ⑪：已答满/提前结束→收尾；否则→下一题
+        </div>
+      </div>
+
+      <div class="group">▍本次新增 (v0.4)</div>
+      <div class="node new"><div class="title">💡 提示系统</div><div class="desc">前端💡按钮 → 服务端独立生成渐进提示(不打断图) → 每题≤2次 → 评分封顶</div><span class="badge">NEW</span></div>
+      <div class="node new"><div class="title">🔊 TTS 朗读</div><div class="desc">打字机吐完后浏览器原生 SpeechSynthesis 朗读面试官发言；STT↔TTS 互斥防回声</div><span class="badge">NEW</span></div>
+      <div class="node new"><div class="title">📚 学习建议</div><div class="desc">报告页展示基于弱项+最弱维度生成的针对性学习建议卡片</div><span class="badge">NEW</span></div>
+
+    </div>
+  </div>
+
+  <!-- ============ WebSocket 协议 ============ -->
+  <div class="ws">
+    <h2 style="font-size:16px;margin-bottom:12px;">🔌 WebSocket 消息协议（前端 ↔ 后端）</h2>
+    <div class="flow">
+      <span class="tag">客户端 →</span>
+      <span class="msg client">config</span><span class="arrow">→</span>
+      <span class="msg client">answer</span><span class="arrow">→</span>
+      <span class="msg client">hint</span><span class="arrow">→</span>
+      <span class="msg client">end</span><span class="arrow">→</span>
+      <span class="msg client">report</span>
+      <span style="width:100%"></span>
+      <span class="tag">← 服务端</span>
+      <span class="msg">config_ok</span><span class="arrow">←</span>
+      <span class="msg">stream_start/chunk/end</span><span class="arrow">←</span>
+      <span class="msg">decision</span><span class="arrow">←</span>
+      <span class="msg">hint</span><span class="arrow">←</span>
+      <span class="msg">interview_ended</span><span class="arrow">←</span>
+      <span class="msg">report_ready</span>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:10px;">
+      stream_type: opening / question / followup / closing / report &nbsp;·&nbsp; 阶段校验: answer/hint/end 仅限 await_answer/await_followup，report 仅限 await_report
+    </div>
+  </div>
+
+  <!-- ============ 端到端时间线 ============ -->
+  <div class="foot">
+    <b>端到端流程：</b>登录 → 选岗/传简历 → InterviewView 连接 WS → sendConfig
+    → <b>开场(TTS) → 第1题(TTS) → 回答 → 评分 → (低分?) → 追问(TTS) → 补充回答 → 合并评分 → 自适应难度调整</b>
+    → 循环至答满或提前结束 → <b>收尾(TTS) → 生成报告 → 跳转 /summary/:reportId</b> → 雷达图 + 强弱项 + <b>学习建议</b>。
+    <br><br>
+    <b>全程串联的记忆：</b>InterviewMemory 按 thread_id 存对话 → 每轮结束超阈值自动压缩为话题级摘要 → 出题/追问只做话题级引用（反幻觉护栏）。
+  </div>
+</div>
+</body>
+</html>

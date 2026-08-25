@@ -285,15 +285,28 @@ class HybridRetriever:
         scoring_points = (
             scoring_points_raw.split("||") if scoring_points_raw else []
         )
+        followup_raw = meta.get("followup_directions", "")
+        followup_directions = (
+            followup_raw.split("||") if followup_raw else []
+        )
+        good_raw = meta.get("good_points", "")
+        good_points = good_raw.split("||") if good_raw else []
+        bad_raw = meta.get("bad_points", "")
+        bad_points = bad_raw.split("||") if bad_raw else []
 
         result = {
             "id": results["ids"][0],
             "question": results["documents"][0],
             "standard_answer": meta.get("answer", ""),
             "scoring_points": scoring_points,
+            "good_points": good_points,
+            "bad_points": bad_points,
             "max_score": meta.get("max_score", 10),
             "category": meta.get("category", ""),
             "difficulty": meta.get("difficulty", 2),
+            "type": meta.get("type", "knowledge"),
+            "scenario": meta.get("scenario", ""),
+            "followup_directions": followup_directions,
         }
         self._answer_cache[question_id] = result
         return result

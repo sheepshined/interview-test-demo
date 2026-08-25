@@ -28,12 +28,14 @@ def test_demo_login_accepts_only_fixed_account():
 
 
 def test_roles_endpoint_returns_all_eight_roles():
+    """/api/roles 应返回 config.ROLES 中定义的全部岗位。"""
+    import config
     response = client.get("/api/roles")
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert len(payload["roles"]) == 8
-    assert len({role["key"] for role in payload["roles"]}) == 8
+    assert len(payload["roles"]) == len(config.ROLES)
+    assert len({role["key"] for role in payload["roles"]}) == len(config.ROLES)
 
 
 def test_text_resume_endpoint_is_available():

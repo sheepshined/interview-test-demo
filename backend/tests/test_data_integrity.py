@@ -64,3 +64,22 @@ def test_question_ids_are_unique():
     """所有题目 id 必须唯一。"""
     ids = [q["id"] for q in _load_all_questions()]
     assert len(ids) == len(set(ids)), f"存在重复题目 id: {[i for i in ids if ids.count(i) > 1]}"
+
+
+def test_scenario_questions_have_scenario_and_followups():
+    """场景题(type=scenario)必须提供场景描述和至少 2 条预设追问方向。"""
+    scenario_questions = [q for q in _load_all_questions() if q.get("type") == "scenario"]
+    for q in scenario_questions:
+        assert q.get("scenario", "").strip(), f"{q['id']} 场景题缺少 SCENARIO 字段"
+        assert len(q.get("followup_directions", [])) >= 2, (
+            f"{q['id']} 场景题应提供至少 2 条预设追问方向(FOLLOWUP)"
+        )
+
+
+def test_scenario_questions_have_adequate_scoring_points():
+    """场景题评分要点应至少 3 条, 覆盖多个合理方案维度。"""
+    scenario_questions = [q for q in _load_all_questions() if q.get("type") == "scenario"]
+    for q in scenario_questions:
+        assert len(q.get("scoring_points", [])) >= 3, (
+            f"{q['id']} 场景题评分要点应至少 3 条"
+        )

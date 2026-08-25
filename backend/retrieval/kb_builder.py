@@ -5,10 +5,14 @@ retrieval/kb_builder.py — 离线知识库构建器 (LangChain 版)
 解析 .md 题库文件, 向量化后存入 ChromaDB。
 
 题库格式 (每道题用 --- 分隔):
-  <!-- id:py_001 | category:基础 | difficulty:1 | difficulty_label:初级 -->
+  <!-- id:py_001 | category:基础 | difficulty:1 | difficulty_label:初级 | type:knowledge -->
   ### Q: 题目文本
+  ### SCENARIO: 场景描述 (可选, 场景题用, 供面试官自然引入)
   ### A: 标准答案
-  ### S: 得分点列表
+  ### S: 得分点/评分要点列表
+  ### GOOD: 好答案特征列表 (可选, 报告展示"好答案 vs 差答案"对比)
+  ### BAD: 差答案特征列表 (可选)
+  ### FOLLOWUP: 预设追问方向列表 (可选, 场景题建议提供)
 """
 import os
 import re
@@ -37,42 +41,65 @@ def parse_questions_from_file(filepath: str) -> List[Dict]:
         if not block.strip():
             continue
 
-        # 提取元信息 <!-- id:xxx | category:xxx | difficulty:x | difficulty_label:xxx -->
+        # 提取元信息 <!-- id:xxx | category:xxx | difficulty:x | difficulty_label:xxx | type:xxx -->
         meta_match = re.search(r"<!--\s*(.*?)\s*-->", block)
-        meta = {"id": "", "category": "", "difficulty": "2", "difficulty_label": "中级"}
+        meta = {"id": "", "category": "", "difficulty": "2", "difficulty_label": "中级", "type": "knowledge"}
         if meta_match:                  #group(1) 捕获纯净文本
-            pairs = meta_match.group(1).split("|")   #  管道符切割元信息【id:xxx | category:xxx | difficulty:x | difficulty_label:xxx】
+            pairs = meta_match.group(1).split("|")   #  管道符切割元信息【id:xxx | category:xxx | difficulty:x | difficulty_label:xxx | type:xxx】
             for pair in pairs:
-                kv = pair.strip().split(":", 1)    #  冒号切割元信息【id:xxx | category:xxx | difficulty:x | difficulty_label:xxx】
+                kv = pair.strip().split(":", 1)    #  冒号切割元信息
                 if len(kv) == 2:
                     meta[kv[0].strip()] = kv[1].strip()
 
-        # 提取 Q / A / S 字段
+        # 提取 Q / SCENARIO / A / S / GOOD / BAD / FOLLOWUP 字段
         q_match = re.search(r"### Q:\s*(.*?)(?=\n###|$)", block, re.DOTALL)
+        scenario_match = re.search(r"### SCENARIO:\s*(.*?)(?=\n###|$)", block, re.DOTALL)
         a_match = re.search(r"### A:\s*(.*?)(?=\n###|$)", block, re.DOTALL)
         s_match = re.search(r"### S:\s*(.*?)(?=\n###|$)", block, re.DOTALL)
+        good_match = re.search(r"### GOOD:\s*(.*?)(?=\n###|$)", block, re.DOTALL)
+        bad_match = re.search(r"### BAD:\s*(.*?)(?=\n###|$)", block, re.DOTALL)
+        followup_match = re.search(r"### FOLLOWUP:\s*(.*?)(?=\n###|$)", block, re.DOTALL)
 
         if not q_match or not a_match:
             continue
 
         question_text = q_match.group(1).strip()
         answer_text = a_match.group(1).strip()
-        scoring_lines = []
-        if s_match:
-            scoring_lines = [
+        scenario_text = scenario_match.group(1).strip() if scenario_match else ""
+
+        def _parse_list(match):
+            """提取以 '- ' 开头的列表项"""
+            if not match:
+                return []
+            return [
                 line.strip("- ").strip()
-                for line in s_match.group(1).strip().split("\n")
+                for line in match.group(1).strip().split("\n")
                 if line.strip().startswith("-")
             ]
+
+        scoring_lines = _parse_list(s_match)
+        good_lines = _parse_list(good_match)
+        bad_lines = _parse_list(bad_match)
+        followup_lines = _parse_list(followup_match)
+
+        # 规范化 type: 只接受 knowledge / scenario, 其他值回落 knowledge
+        question_type = meta.get("type", "knowledge").strip().lower()
+        if question_type not in {"knowledge", "scenario"}:
+            question_type = "knowledge"
 
         questions.append({
             "id": meta["id"],
             "category": meta["category"],
             "difficulty": int(meta["difficulty"]),
             "difficulty_label": meta["difficulty_label"],
+            "type": question_type,
+            "scenario": scenario_text,
             "question": question_text,
             "answer": answer_text,
             "scoring_points": scoring_lines,
+            "good_points": good_lines,
+            "bad_points": bad_lines,
+            "followup_directions": followup_lines,
             "max_score": 10,
         })
 
@@ -143,18 +170,32 @@ class KnowledgeBaseBuilder:
         for q in questions:
             qid = q["id"] or f"{q['role']}_{q['category']}_{len(ids)+1}"
 
+            # 检索键 = 题目文本 (+ 场景/分类, 帮助场景题被关键词命中, 不含答案避免泄漏)
+            searchable = q["question"]
+            if q.get("scenario"):
+                searchable += f"\n场景: {q['scenario']}"
+            if q.get("category"):
+                searchable += f"\n分类: {q['category']}"
+            if q.get("type") == "scenario":
+                searchable += "\n类型: 场景设计题"
+
             # 检索键 = 题目文本 (不含答案, 避免答案泄漏到检索阶段)
             doc = Document(
-                page_content=q["question"],
+                page_content=searchable,
                 metadata={
                     "source_file": q["source_file"],
                     "role": q["role"],
                     "category": q["category"],
                     "difficulty": q["difficulty"],
                     "difficulty_label": q["difficulty_label"],
+                    "type": q.get("type", "knowledge"),
                     # 答案 + 得分点存在 metadata 中, 评分阶段单独取出
                     "answer": q["answer"],
                     "scoring_points": "||".join(q["scoring_points"]),
+                    "good_points": "||".join(q.get("good_points", [])),
+                    "bad_points": "||".join(q.get("bad_points", [])),
+                    "scenario": q.get("scenario", ""),
+                    "followup_directions": "||".join(q.get("followup_directions", [])),
                     "max_score": q["max_score"],
                 },
             )

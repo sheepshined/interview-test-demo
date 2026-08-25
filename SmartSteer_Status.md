@@ -324,4 +324,71 @@ cd E:\hiagent\DEMO3\TOtal\backend && python main.py rebuild
 
 ---
 
-*本文件为交接文档，不替代 README/START_GUIDE；内容基于 2026-08-11 工作区代码审阅与真实 LLM 验证。*
+## 7. v0.5 变更记录 (2026-08-25)
+
+### 7.1 新增岗位：大模型应用开发工程师（llm_app）
+
+- `config.py` ROLES 新增 `llm_app`：标题"大模型应用开发工程师"，tags 含 Agent/RAG/大模型/Prompt工程/向量检索/工具调用/Embedding/LangChain
+- 前端选岗页通过 `/api/roles` 动态读取，**无需改前端代码**自动显示新岗位
+- `test_api_entrypoints.py` 岗位数断言改为动态读 `config.ROLES`（8 → 9 后不再硬编码）
+
+### 7.2 题库重建：llm_app 岗位 9 方面 47 题
+
+| 方面 | 题数 | ID 范围 |
+|---|---|---|
+| RAG（含文本分块专项） | 14 | `llm_rag_001` ~ `llm_rag_014` |
+| Transformer | 8 | `llm_transformer_001` ~ `llm_transformer_008` |
+| 微调（Prompting/PEFT/LoRA 系列） | 7 | `llm_ft_001` ~ `llm_ft_007` |
+| 提示词工程 | 4 | `llm_prompt_001` ~ `llm_prompt_004` |
+| 部署（Docker 部署 Coze） | 4 | `llm_deploy_001` ~ `llm_deploy_004` |
+| Skills | 3 | `llm_skills_001` ~ `llm_skills_003` |
+| Memory | 3 | `llm_memory_001` ~ `llm_memory_003` |
+| MCP | 2 | `llm_mcp_001` ~ `llm_mcp_002` |
+| 工具调用 | 2 | `llm_tool_001` ~ `llm_tool_002` |
+
+难度分布：初级 2 / 中级 26 / 高级 19。全部为 `type:scenario` 场景题（含 SCENARIO 场景 + FOLLOWUP 预设追问 + GOOD/BAD 好差答案）。`main.py rebuild` 后向量库共 133 题（原 86 + 47）。
+
+### 7.3 题库格式扩展（支持场景题 + 好差答案）
+
+`data/*.md` 新格式（向后兼容旧题，`type` 缺省 `knowledge`）：
+
+```markdown
+---
+<!-- id:llm_rag_001 | category:RAG | difficulty:2 | difficulty_label:中级 | type:scenario -->
+### Q: ...
+### SCENARIO: ...     # 场景背景（场景题必写）
+### A: ...
+### S:               # 知识题=得分点, 场景题=评分要点(≥3条)
+- ...
+### GOOD:            # 好答案特征（报告"好答案 vs 差答案"对比用）
+- ...
+### BAD:             # 差答案特征
+- ...
+### FOLLOWUP:        # 预设追问方向（场景题≥2条）
+- ...
+```
+
+### 7.4 代码改造：GOOD/BAD 全链路 + 开放题评分
+
+| 文件 | 改动 |
+|---|---|
+| `retrieval/kb_builder.py` | 解析 `type` 元信息 + `SCENARIO/GOOD/BAD/FOLLOWUP` 字段；检索文本拼入场景/分类/题型提高命中率；metadata 存 good_points/bad_points |
+| `retrieval/retriever.py` | `get_answer()` 返回 `type/scenario/good_points/bad_points/followup_directions` |
+| `agent/graph.py` | ① `score_candidate()` 按题型分支：场景题把 S 当"评分要点"并注入开放题评分指令（方案合理即可，不因未提及扣分）；② 追问优先用题库 `followup_directions`；③ 出题传 `scenario` 自然引入；④ record/雷达 JSON 记录 good/bad；⑤ 报告正文增加"好答案 vs 差答案"对比段 |
+| `agent/prompts.py` | SCORER 支持 `scoring_instruction`（开放题规则）；QUESTION 支持场景铺垫（规则10） |
+| `frontend/src/views/SummaryView.vue` | 新增"🆚 好答案 vs 差答案"对比卡片（绿=高分特征 / 红=踩坑特征） |
+| `tests/test_data_integrity.py` | 新增 2 个场景题校验（SCENARIO+FOLLOWUP≥2 / S≥3） |
+
+### 7.5 验证结果
+
+| 验证项 | 结果 |
+|---|---|
+| 向量库重建 | ✅ 133 题（llm_app 47 题全部入库，9 个分类齐全） |
+| 检索"RAG 幻觉" | ✅ 精准命中 llm_rag_008/007/003 |
+| get_answer 新字段 | ✅ type/scenario/good/bad/followup 全部返回 |
+| pytest | ✅ 23/23 通过（含 2 个新场景题校验） |
+| npm build | ✅ 通过（SummaryView 新增对比卡片） |
+
+---
+
+*本文件为交接文档，不替代 README/START_GUIDE；内容基于 2026-08-25 工作区代码审阅与验证。*

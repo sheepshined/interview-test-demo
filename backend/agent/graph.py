@@ -362,15 +362,31 @@ def build_interview_graph(
             }
 
         scoring_points = answer_data.get("scoring_points", [])
-        scoring_points_text = (
-            "\n".join(f"  - {point}" for point in scoring_points)
-            if scoring_points else "无明确得分点"
-        )
+        question_type = answer_data.get("type", "knowledge")
+        # 知识题: S 字段是"得分点", 对照命中情况扣分
+        # 场景题: S 字段是"评分要点"(合理方案即可), 提示评分模型不要因未提及某条而扣分
+        if question_type == "scenario":
+            scoring_points_text = (
+                "\n".join(f"  - {point}" for point in scoring_points)
+                if scoring_points else "无明确评分要点"
+            )
+            scoring_instruction = (
+                "本题为【场景设计/开放题】, 以下 S 列表是评分要点(合理方案的参考维度), "
+                "不是必须逐条命中的标准答案。请评估候选人方案是否合理、论证是否完整、"
+                "技术表述是否准确——只要方案自洽且技术正确, 不因未提及参考要点而扣分。"
+            )
+        else:
+            scoring_points_text = (
+                "\n".join(f"  - {point}" for point in scoring_points)
+                if scoring_points else "无明确得分点"
+            )
+            scoring_instruction = ""
         try:
             score_result: ScoreResult = scoring_chain.invoke({
                 "question": answer_data["question"],
                 "standard_answer": answer_data["standard_answer"],
                 "scoring_points": scoring_points_text,
+                "scoring_instruction": scoring_instruction,
                 "candidate_answer": candidate_answer,
                 "format_instructions": get_format_instructions(),
             })
@@ -574,6 +590,9 @@ def build_interview_graph(
             "question_index": state["question_index"],
             "total_count": state["total_count"],
         }
+        # 场景题: 取题库预设场景描述, 供 LLM 自然引入 (scenario 在 answer_data 中)
+        answer_data_for_scenario = state.get("current_answer_data") or {}
+        question_scenario = answer_data_for_scenario.get("scenario", "") or ""
         rendered = await _stream_chain(
             writer,
             question_chain,
@@ -583,6 +602,7 @@ def build_interview_graph(
                 "question_index": state["question_index"],
                 "total_count": state["total_count"],
                 "question_text": question["question"],
+                "question_scenario": question_scenario,
                 "resume_section": resume_section,
                 "prev_context": _build_prev_context(state),
                 "history": _get_memory(state).get_history_for_chain(),
@@ -647,10 +667,16 @@ def build_interview_graph(
         initial = state.get("initial_result", {})
         missed_points = initial.get("missed_points", [])
         question = state.get("current_question", {})
-        missed_topic = (
-            missed_points[0]
-            if missed_points else question.get("question", "")[:80]
-        )
+        answer_data = state.get("current_answer_data") or {}
+        # 场景题优先使用题库预设追问方向; 否则退回评分链的 missed_points 推断
+        preset_followups = answer_data.get("followup_directions", [])
+        if preset_followups:
+            missed_topic = "、".join(preset_followups[:3])
+        else:
+            missed_topic = (
+                missed_points[0]
+                if missed_points else question.get("question", "")[:80]
+            )
         related = retriever.get_question(
             topic=missed_topic,
             role=state["role_key"],
@@ -763,6 +789,8 @@ def build_interview_graph(
             "difficulty": answer_data.get("difficulty") or question.get("difficulty", 2),
             "difficulty_at_time": state.get("difficulty", 2),  # 出题时的实际难度
             "hints_used": state.get("hint_count", 0),  # 提示使用次数
+            "good_points": answer_data.get("good_points", []),  # 好答案特征 (报告对比)
+            "bad_points": answer_data.get("bad_points", []),    # 差答案特征 (报告对比)
             "is_followup": False,
             "round": completed,
         }
@@ -941,6 +969,29 @@ def build_interview_graph(
                     f"{breakdown.get('depth', '-')} | "
                     f"{breakdown.get('clarity', '-')} |"
                 )
+            # 好答案 vs 差答案对比 (题目带 GOOD/BAD 字段时展示, 供候选人复盘)
+            for index, record in enumerate(records, 1):
+                good_points = record.get("good_points", []) or []
+                bad_points = record.get("bad_points", []) or []
+                if not good_points and not bad_points:
+                    continue
+                lines.extend([
+                    "",
+                    f"### 第{index}题 好答案 vs 差答案",
+                    "",
+                ])
+                if good_points:
+                    lines.append("**✅ 高分答案特征:**")
+                    for point in good_points:
+                        lines.append(f"- {point}")
+                    lines.append("")
+                if bad_points:
+                    lines.append("**❌ 低分踩坑特征:**")
+                    for point in bad_points:
+                        lines.append(f"- {point}")
+                    lines.append("")
+                lines.append("---")
+                lines.append("")
         else:
             lines.extend(["## 面试记录", "", "本次面试在完成题目之前结束，暂无可评分记录。"])
         structured = "\n".join(lines)
@@ -1088,6 +1139,8 @@ def build_interview_graph(
                         "had_followup": bool(record.get("followup_question")),
                         "difficulty_at_time": record.get("difficulty_at_time", 2),
                         "hints_used": record.get("hints_used", 0),
+                        "good_points": record.get("good_points", []),
+                        "bad_points": record.get("bad_points", []),
                     }
                     for index, record in enumerate(records, 1)
                 ],
