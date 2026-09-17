@@ -50,18 +50,50 @@
       <!-- 强弱项 (阶段2 新增) -->
       <div v-if="radar && (radar.strengths.length || radar.weaknesses.length)" class="ds-card" style="padding:20px;margin-bottom:24px;display:flex;gap:24px;flex-wrap:wrap;">
         <div v-if="radar.strengths.length" style="flex:1;min-width:200px;">
-          <div style="font-size:13px;font-weight:600;color:var(--success,#16a34a);margin-bottom:8px;">✓ 优势项</div>
+          <div class="sum-list-title good"><DSIcon name="thumbs-up" :size="13" />优势项</div>
           <div v-for="s in radar.strengths" :key="s" style="font-size:13px;color:var(--text-secondary);margin-bottom:4px;">{{ s }}</div>
         </div>
         <div v-if="radar.weaknesses.length" style="flex:1;min-width:200px;">
-          <div style="font-size:13px;font-weight:600;color:var(--error,#dc2626);margin-bottom:8px;">△ 待加强</div>
+          <div class="sum-list-title bad"><DSIcon name="triangle-alert" :size="13" />待加强</div>
           <div v-for="w in radar.weaknesses" :key="w" style="font-size:13px;color:var(--text-secondary);margin-bottom:4px;">{{ w }}</div>
         </div>
       </div>
 
       <!-- 学习建议 (新增) -->
       <div v-if="radar && radar.learning_suggestions && radar.learning_suggestions.length" class="ds-card" style="padding:20px;margin-bottom:24px;">
-        <div style="font-size:15px;font-weight:600;margin:0 0 16px;color:var(--text-primary);">📚 学习建议</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <div class="sum-section-title"><DSIcon name="book-open" :size="15" />学习建议</div>
+          <button
+            class="ds-btn"
+            :class="kbImported ? 'ds-btn-ghost' : 'ds-btn-primary'"
+            style="padding:5px 14px;font-size:13px;display:inline-flex;align-items:center;gap:5px;"
+            :disabled="kbImporting || kbImported"
+            @click="importToKnowledge"
+          ><DSIcon :name="kbImported ? 'check' : 'download'" :size="13" />{{ kbImported ? `已入库 ${kbImportedCount} 条` : (kbImporting ? '入库中…' : '存入知识库') }}</button>
+        </div>
+
+        <!-- 覆盖检测: 已入库后展示每条薄弱点的知识库覆盖情况 -->
+        <div v-if="kbCoverage" style="margin-bottom:16px;padding:12px;border-radius:8px;background:#fafafa;border:1px solid var(--border-default);">
+          <div class="sum-sub-title"><DSIcon name="target" :size="13" />知识库覆盖情况</div>
+          <div v-for="c in kbCoverage" :key="c.topic" style="font-size:12.5px;margin-bottom:6px;display:flex;align-items:flex-start;gap:6px;">
+            <DSIcon v-if="c.matched.length" name="circle-check" :size="14" class="sum-ic good" />
+            <DSIcon v-else name="triangle-alert" :size="14" class="sum-ic warn" />
+            <span style="color:var(--text-secondary);">
+              {{ c.topic }}：
+              <template v-if="c.matched.length">
+                已有 {{ c.matched.length }} 条相关
+                <a v-for="m in c.matched" :key="m.note_id" href="javascript:void(0)"
+                   style="color:var(--brand-600,#2563eb);margin-right:6px;"
+                   @click="$router.push(`/knowledge/note/${m.note_id}`)">「{{ m.title }}」</a>
+              </template>
+              <template v-else>
+                知识库中无相关内容，
+                <router-link to="/knowledge" style="color:#b45309;font-weight:600;">建议导入对应资料 →</router-link>
+              </template>
+            </span>
+          </div>
+        </div>
+
         <div v-for="(item, idx) in radar.learning_suggestions" :key="idx" style="margin-bottom:16px;padding:12px;background:var(--bg-secondary,#f4f4f5);border-radius:8px;border-left:3px solid var(--brand-600);">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
             <div style="font-size:14px;font-weight:600;color:var(--text-primary);">{{ item.topic }}</div>
@@ -73,16 +105,16 @@
 
       <!-- 好答案 vs 差答案对比 (新增) -->
       <div v-if="radar && radar.questions && radar.questions.some(q => q.good_points && q.good_points.length)" class="ds-card" style="padding:20px;margin-bottom:24px;">
-        <div style="font-size:15px;font-weight:600;margin:0 0 16px;color:var(--text-primary);">🆚 好答案 vs 差答案</div>
+        <div class="sum-section-title" style="margin:0 0 16px;"><DSIcon name="funnel" :size="15" />好答案 vs 差答案</div>
         <div v-for="(q, idx) in radar.questions.filter(q => q.good_points && q.good_points.length)" :key="idx" style="padding-bottom:20px;border-bottom:1px solid var(--border-default);margin-bottom:16px;">
           <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">第 {{ q.round }} 题 · {{ q.question }}</div>
           <div style="display:flex;gap:16px;flex-wrap:wrap;">
             <div style="flex:1;min-width:240px;padding:12px;background:#f0fdf4;border-left:3px solid #16a34a;border-radius:8px;">
-              <div style="font-size:12px;font-weight:600;color:#16a34a;margin-bottom:6px;">✅ 高分答案特征</div>
+              <div class="sum-compare-title good"><DSIcon name="thumbs-up" :size="12" />高分答案特征</div>
               <div v-for="p in q.good_points" :key="p" style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;margin-bottom:3px;">{{ p }}</div>
             </div>
             <div v-if="q.bad_points && q.bad_points.length" style="flex:1;min-width:240px;padding:12px;background:#fef2f2;border-left:3px solid #dc2626;border-radius:8px;">
-              <div style="font-size:12px;font-weight:600;color:#dc2626;margin-bottom:6px;">❌ 低分踩坑特征</div>
+              <div class="sum-compare-title bad"><DSIcon name="thumbs-down" :size="12" />低分踩坑特征</div>
               <div v-for="p in q.bad_points" :key="p" style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;margin-bottom:3px;">{{ p }}</div>
             </div>
           </div>
@@ -117,7 +149,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import TopNav from '../components/TopNav.vue'
 import RadarChart from '../components/RadarChart.vue'
-import { getReport, getReportRadar } from '../api'
+import DSIcon from '../components/DSIcon.vue'
+import { getReport, getReportRadar, kbImportFromReport } from '../api'
 
 const route = useRoute()
 const reportId = computed(() => String(route.params.reportId || ''))
@@ -128,6 +161,38 @@ const answeredCount = ref(sessionStorage.getItem('answeredCount') || '0')
 const totalCount = ref(sessionStorage.getItem('totalCount') || '0')
 const elapsedTime = ref(sessionStorage.getItem('elapsedTime') || '00:00')
 const radar = ref(null)
+
+// 学习建议一键入库 (v0.7; v0.8 返回覆盖检测)
+const kbImporting = ref(false)
+const kbImported = ref(false)
+const kbImportedCount = ref(0)
+const kbCoverage = ref(null)
+
+async function importToKnowledge() {
+  if (kbImporting.value || kbImported.value || !radar.value) return
+  kbImporting.value = true
+  try {
+    const items = radar.value.learning_suggestions.map(s => ({
+      topic: s.topic,
+      suggestion: s.suggestion,
+    }))
+    const result = await kbImportFromReport(items, reportId.value)
+    if (result.success) {
+      kbImportedCount.value = result.created.length
+      kbImported.value = true
+      kbCoverage.value = result.coverage || null
+      const skipped = result.skipped.length
+        ? `（${result.skipped.length} 条同名笔记已存在，跳过）` : ''
+      const sparseCount = (result.coverage || []).filter(c => c.sparse).length
+      const sparseTip = sparseCount ? `\n注意：${sparseCount} 个薄弱点在知识库中无相关内容，建议导入资料。` : ''
+      alert(`已存入知识库 ${result.created.length} 条${skipped}${sparseTip}\n详见下方「知识库覆盖情况」。`)
+    } else {
+      alert(result.message || '入库失败，请重试')
+    }
+  } finally {
+    kbImporting.value = false
+  }
+}
 
 onMounted(async () => {
   if (!reportId.value) return
@@ -171,3 +236,50 @@ function copyReport() {
   alert('报告已复制到剪贴板')
 }
 </script>
+
+<style scoped>
+.sum-section-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sum-sub-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.sum-list-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.sum-list-title.good { color: var(--success, #16a34a); }
+.sum-list-title.bad { color: var(--error, #dc2626); }
+
+.sum-compare-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.sum-compare-title.good { color: #16a34a; }
+.sum-compare-title.bad { color: #dc2626; }
+
+.sum-ic { flex-shrink: 0; margin-top: 2px; }
+.sum-ic.good { color: var(--success, #16a34a); }
+.sum-ic.warn { color: #b45309; }
+</style>

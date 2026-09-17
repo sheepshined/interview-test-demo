@@ -62,6 +62,10 @@ class FakeRetriever:
         candidates = self.get_question("", role, exclude_ids=exclude_ids, top_k=1)
         return candidates[0] if candidates else None
 
+    def get_question_by_id(self, question_id):
+        """v0.9: graph 的演示首题路径会调用, fake 检索器返回 None 走正常检索"""
+        return next((q.copy() for q in self.questions if q["id"] == question_id), None)
+
     def get_answer(self, question_id):
         question = next((q for q in self.questions if q["id"] == question_id), None)
         if not question:
@@ -75,6 +79,14 @@ class FakeRetriever:
             "difficulty": question["difficulty"],
             "max_score": 10,
         }
+
+
+@pytest.fixture(autouse=True)
+def _single_sample_scoring(monkeypatch):
+    """v0.9 评分自一致性默认采样 3 次, 会打乱 FakeListChatModel 的响应序列;
+    流程类测试只关心单次评分行为, 这里固定为 1。采样合并逻辑单独在
+    test_scoring_samples_median 中验证。"""
+    monkeypatch.setattr(config, "SCORING_SAMPLES", 1)
 
 
 async def collect_events(graph, graph_input, cfg):
@@ -358,3 +370,51 @@ def test_build_prev_context_first_question():
     """第一题(无 records): 返回第一题提示。"""
     ctx = _build_prev_context({"records": []})
     assert "第一题" in ctx
+
+
+# ============================================================
+# v0.9 评分自一致性: 三次采样取中位
+# ============================================================
+
+def _mk_score(score: int, hit=None, miss=None):
+    from agent.models import ScoreResult, ScoreBreakdown
+    return ScoreResult(
+        score=score, max_score=10,
+        score_breakdown=ScoreBreakdown(accuracy=score, completeness=score, depth=score, clarity=score),
+        hit_points=hit or [], missed_points=miss or [],
+        feedback=f"测试评分 {score}", is_correct=score >= 5,
+    )
+
+
+def test_scoring_samples_median_merges_correctly():
+    """三次采样: 总分/四维取中位, 得分点按过半采样归并, 反馈取中位那份。"""
+    from agent.graph import _merge_score_samples
+
+    merged = _merge_score_samples([
+        _mk_score(7, hit=["概念正确", "提到了overlap"], miss=["没讲分块"]),
+        _mk_score(6, hit=["概念正确"], miss=["没讲分块", "漏了embedding"]),
+        _mk_score(8, hit=["概念正确", "提到了overlap", "举了例子"], miss=[]),
+    ])
+    assert merged.score == 7                      # 中位数 (6,7,8)
+    assert merged.score_breakdown.depth == 7      # (6,7,8) → 7
+    hit_text = " ".join(merged.hit_points)
+    assert "概念正确" in hit_text                  # 3/3 采样命中
+    assert "overlap" in hit_text                  # 2/3 过半命中
+    assert not any("embedding" in p for p in merged.hit_points)   # 1/3 不过半
+
+
+def test_scoring_samples_single_and_empty():
+    """单采样直通; 空采样安全兜底。"""
+    from agent.graph import _merge_score_samples
+
+    single = _merge_score_samples([_mk_score(5, hit=["x"], miss=["y"])])
+    assert single.score == 5 and single.hit_points == ["x"]
+
+    empty = _merge_score_samples([])
+    assert empty.score == 0 and empty.feedback
+
+
+def test_configure_role_fallback_is_llm_app():
+    """专场化后非法角色回退到大模型应用开发, 不再是已移除的 general_hr。"""
+    assert "general_hr" not in config.ROLES
+    assert config.ROLES["llm_app"]["title"] == "大模型应用开发工程师"

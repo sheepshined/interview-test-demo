@@ -19,6 +19,10 @@ class InterviewState(TypedDict, total=False):
     resume_context: str
     resume_skills: List[str]
     candidate_name: str
+    # 面试模式 (v0.9): standard=题库检索出题; project=项目深挖(按简历 LLM 生成追问链)
+    interview_mode: str
+    # 归属用户 (v0.6 鉴权隔离): WS config 时由 server 注入, 写入报告 JSON 用于按用户隔离
+    username: str
 
     # ---- 面试官人设 ----
     # persona_key: 人设键名 (strict_cto / warm_hr / deep_tech)

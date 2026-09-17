@@ -7,9 +7,18 @@
 import asyncio
 import json
 
+import httpx
 import websockets
 
 WS_URL = "ws://127.0.0.1:8000/ws/chat"
+API_URL = "http://127.0.0.1:8000/api"
+
+
+def get_token() -> str:
+    """登录演示账号获取 JWT (WS 握手鉴权用)。"""
+    resp = httpx.post(f"{API_URL}/login", json={"username": "admin", "password": "123123"})
+    resp.raise_for_status()
+    return resp.json()["token"]
 
 # 正常、有内容的回答——让面试官有"可记住"的具体信息
 ANSWERS = [
@@ -34,7 +43,9 @@ async def run() -> None:
     answer_idx = 0
     report_requested = False
 
-    async with websockets.connect(WS_URL, max_size=2_000_000) as socket:
+    async with websockets.connect(
+        f"{WS_URL}?token={get_token()}", max_size=2_000_000
+    ) as socket:
         await socket.send(json.dumps({
             "type": "config",
             "role": "algorithm",

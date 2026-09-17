@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 模拟面试官 · 项目答辩</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800;900&family=JetBrains+Mono:wght@300;400;500;600&family=Noto+Sans+SC:wght@200;300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #ffffff;
+  --bg-off: #e8e8ec;
+  --bg-2: #f7f7f8;
+  --surface: #f0f0f2;
+  --line: #e8e8ec;
+  --line-strong: #c0c0c0;
+  --text: #1a1a1a;
+  --text-2: #5c5c5c;
+  --text-3: #8b8b8b;
+  --accent: #4B3FE3;
+  --accent-2: #3a2fb8;
+  --accent-soft: rgba(75, 63, 227, .10);
+  --accent-bright: #7B71FF;
+  --sans: "Inter", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", "Cascadia Code", monospace;
+  --pad-x: 77px;
+  --pad-y: 69px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg-off); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; font-feature-settings: "ss01", "cv11"; }
+body { overflow: hidden; }
+canvas.ascii-bg {
+  position: absolute; inset: 0;
+  width: 1280px; height: 720px;
+  z-index: 0; pointer-events: none;
+  opacity: .6;
+}
+.deck { position: fixed; width: 1280px; height: 720px; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 1; flex-shrink: 0; overflow: hidden; background: var(--bg); box-shadow: 0 10px 60px rgba(0,0,0,.16), 0 2px 8px rgba(0,0,0,.08); }
+.slide {
+  position: absolute; inset: 0;
+  z-index: 1;
+  display: grid;
+  padding: var(--pad-y) var(--pad-x);
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity .5s cubic-bezier(.2,.7,.2,1), visibility .5s;
+}
+.slide.active { opacity: 1; visibility: visible; pointer-events: auto; }
+
+/* Chrome */
+.chrome-top, .chrome-bottom {
+  position: absolute; left: var(--pad-x); right: var(--pad-x);
+  z-index: 20;
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--mono); font-size: 12px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.chrome-top { top: 28px; }
+.chrome-bottom { bottom: 28px; }
+.mark { display: inline-flex; align-items: center; gap: 10px; color: var(--text-2); }
+.mark .dot { width: 8px; height: 8px; background: var(--accent); border-radius: 999px; box-shadow: 0 0 0 4px var(--accent-soft); }
+.page { display: inline-flex; align-items: center; gap: 14px; font-variant-numeric: tabular-nums; }
+.page .num { color: var(--text); font-weight: 500; }
+.page .sep { width: 24px; height: 1px; background: var(--line-strong); display: inline-block; }
+.deck:has(.s-close.active) .chrome-top,
+.deck:has(.s-close.active) .chrome-bottom { opacity: 0; visibility: hidden; }
+
+/* Nav */
+.nav {
+  position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 6px; z-index: 30;
+  padding: 8px 14px;
+  background: rgba(255,255,255,.82); backdrop-filter: blur(12px);
+  border: 1px solid var(--line); border-radius: 20px;
+}
+.nav i {
+  width: 22px; height: 3px; background: var(--line-strong);
+  border-radius: 2px; transition: all .35s ease; cursor: pointer;
+}
+.nav i.active { background: var(--accent); width: 44px; }
+
+/* Typography */
+.kicker {
+  display: inline-flex; align-items: center; gap: 12px;
+  font-family: var(--mono); font-size: 12px; letter-spacing: .22em;
+  text-transform: uppercase; color: var(--accent);
+}
+.kicker::before { content: ""; width: 28px; height: 2px; background: var(--accent); }
+.h-display { font-family: var(--sans); font-weight: 200; font-size: 108px; line-height: .96; letter-spacing: -.03em; }
+.h-1 { font-family: var(--sans); font-weight: 300; font-size: 72px; line-height: 1.02; letter-spacing: -.02em; }
+.h-2 { font-family: var(--sans); font-weight: 400; font-size: 38px; line-height: 1.15; }
+.lead { font-family: var(--sans); font-size: 18px; line-height: 1.7; color: var(--text-2); max-width: 62ch; }
+.body { font-size: 15px; line-height: 1.7; color: var(--text-2); }
+.en { font-family: var(--mono); font-weight: 400; letter-spacing: .08em; text-transform: uppercase; }
+.en-num { font-family: var(--sans); font-variant-numeric: tabular-nums; }
+.rule { height: 1px; background: var(--line); width: 100%; }
+
+/* T01 Cover */
+.s-cover { grid-template-columns: 1fr; grid-template-rows: 1fr auto; align-items: stretch; }
+.cover-main { align-self: center; }
+.cover-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; padding-top: 32px; border-top: 1px solid var(--line); }
+.cover-meta > div { color: var(--text-3); font-family: var(--mono); font-size: 11px; letter-spacing: .18em; text-transform: uppercase; }
+.cover-meta strong { display: block; margin-top: 8px; color: var(--text); font-family: var(--sans); font-weight: 600; font-size: 18px; letter-spacing: -.01em; text-transform: none; }
+.cover-chinese { font-family: var(--sans); font-weight: 200; line-height: .95; font-size: 120px; letter-spacing: -.025em; display: flex; flex-direction: column; }
+.cover-chinese span:last-child { color: var(--accent); }
+.cover-sub { margin-top: 22px; max-width: 68ch; }
+.cover-sub em { font-style: normal; color: var(--text); font-weight: 500; }
+
+/* T02 Agenda */
+.s-agenda { grid-template-columns: minmax(280px, 26%) 1fr; gap: 77px; align-items: center; }
+.agenda-side { align-self: center; padding-bottom: 8px; }
+.agenda-side .lead { margin-top: 24px; }
+.agenda-list { display: flex; flex-direction: column; min-height: 0; overflow: hidden; align-self: center; }
+.agenda-item { display: grid; grid-template-columns: 90px 1fr auto; align-items: baseline; padding: 18px 0; border-top: 1px solid var(--line); gap: 24px; }
+.agenda-item:last-child { border-bottom: 1px solid var(--line); }
+.agenda-item .idx { font-family: var(--sans); font-weight: 200; font-size: 22px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.agenda-item .name { font-family: var(--sans); font-weight: 500; font-size: 26px; letter-spacing: -.015em; }
+.agenda-item .en { color: var(--text-3); font-size: 13px; letter-spacing: .14em; text-transform: uppercase; font-family: var(--mono); }
+
+/* T03 Brand */
+.s-brand { grid-template-columns: 1fr 1fr; gap: 69px; align-items: center; }
+.brand-left h1 { margin-top: 20px; }
+.brand-left .lead { margin-top: 22px; }
+.brand-stats { margin-top: 40px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; padding-top: 24px; border-top: 1px solid var(--line); }
+.brand-stats > div { display: grid; grid-template-rows: 1fr auto; align-items: end; }
+.brand-stats .k { font-family: var(--sans); font-weight: 200; font-size: 46px; color: var(--text); letter-spacing: -.02em; line-height: 1; display: flex; align-items: flex-end; }
+.brand-stats .k b { color: var(--accent); font-weight: 500; }
+.brand-stats .lbl { margin-top: 8px; color: var(--text-3); font-size: 12px; letter-spacing: .16em; text-transform: uppercase; font-family: var(--mono); }
+.brand-cards { display: grid; grid-template-columns: 1fr; gap: 14px; max-height: 582px; overflow: hidden; align-content: center; }
+.brand-card { padding: 20px 24px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; display: grid; grid-template-columns: 46px 1fr auto; align-items: center; gap: 22px; transition: transform .3s ease, border-color .3s ease; }
+.brand-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+.brand-card .tag { font-family: var(--mono); font-size: 11px; color: var(--text-3); letter-spacing: .18em; text-transform: uppercase; font-variant-numeric: tabular-nums; }
+.brand-card .title { font-family: var(--sans); font-weight: 600; font-size: 19px; margin-top: 4px; }
+.brand-card .desc { color: var(--text-2); font-size: 13px; margin-top: 6px; line-height: 1.5; }
+.brand-card .badge { padding: 6px 12px; border: 1px solid var(--accent); border-radius: 999px; font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+
+/* T04 Grid Lines */
+.s-lines { display: flex !important; flex-direction: column; justify-content: center; gap: 32px; }
+.lines-head { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 32px; }
+.lines-head .h-1 { font-size: 64px; }
+.lines-head .lead { max-width: 56ch; margin-top: 16px; font-size: 14px; }
+.lines-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.line-cell { background: var(--bg); padding: 30px 26px 22px; display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; min-height: 240px; position: relative; transition: background .35s ease; overflow: hidden; }
+.line-cell::after { content: ""; position: absolute; top: 0; left: 0; width: 0; height: 2px; background: var(--accent); transition: width .5s cubic-bezier(.2,.7,.15,1); }
+.line-cell:hover { background: var(--bg-2); }
+.line-cell:hover::after { width: 100%; }
+.line-cell .num { position: absolute; top: 22px; right: 24px; font-family: var(--sans); font-weight: 200; font-size: 34px; line-height: 1; color: var(--line-strong); font-variant-numeric: tabular-nums; letter-spacing: -.02em; transition: color .35s; }
+.line-cell:hover .num { color: var(--accent); }
+.line-cell .head { display: flex; flex-direction: column; gap: 10px; padding-right: 44px; }
+.line-cell .name { font-family: var(--sans); font-weight: 600; font-size: 24px; line-height: 1; letter-spacing: -.01em; }
+.line-cell .micro-rule { width: 24px; height: 2px; background: var(--accent); }
+.line-cell .en { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); letter-spacing: .22em; text-transform: uppercase; font-weight: 500; }
+.line-cell .desc { font-size: 14px; line-height: 1.7; color: var(--text-2); padding-right: 8px; align-self: end; }
+.line-cell .desc em { font-style: normal; color: var(--text); font-weight: 500; }
+.line-cell .foot { display: flex; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+.line-cell .foot .glyph { width: 6px; height: 6px; background: var(--accent); display: inline-block; transform: rotate(45deg); margin: 0; }
+.line-cell .accent { font-family: var(--mono); font-size: 10.5px; color: var(--accent); letter-spacing: .24em; text-transform: uppercase; font-weight: 500; }
+
+/* T05 Team Cards */
+.s-team { grid-template-columns: 40% 1fr; gap: 77px; align-items: center; }
+.team-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-height: 582px; overflow: hidden; align-content: center; }
+.team-card { padding: 24px 24px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; gap: 12px; min-height: 168px; position: relative; overflow: hidden; transition: border-color .3s ease, background .3s ease; }
+.team-card:hover { border-color: var(--accent); background: var(--surface); }
+.team-card .idx { font-family: var(--mono); font-weight: 500; color: var(--accent); font-size: 12px; letter-spacing: .2em; }
+.team-card .title { font-family: var(--sans); font-weight: 600; font-size: 19px; line-height: 1.25; }
+.team-card .desc { color: var(--text-2); font-size: 13px; line-height: 1.55; margin-top: auto; }
+.team-card .en-sub { font-family: var(--mono); font-size: 11px; color: var(--text-3); letter-spacing: .18em; text-transform: uppercase; margin-top: 4px; }
+
+/* T06 Refine List */
+.s-refine { grid-template-columns: 34% 1fr; gap: 77px; align-items: center; }
+.refine-list { display: grid; gap: 0; align-content: center; max-height: 582px; overflow: hidden; }
+.refine-item { display: grid; grid-template-columns: 90px 1fr; gap: 32px; padding: 18px 0; border-top: 1px solid var(--line); align-items: start; }
+.refine-item:last-child { border-bottom: 1px solid var(--line); }
+.refine-item .idx { font-family: var(--mono); font-size: 13px; color: var(--text-3); letter-spacing: .16em; padding-top: 5px; font-variant-numeric: tabular-nums; }
+.refine-item .idx b { color: var(--accent); font-weight: 500; }
+.refine-item .h { font-family: var(--sans); font-weight: 600; font-size: 22px; letter-spacing: -.01em; }
+.refine-item .d { color: var(--text-2); font-size: 13.5px; line-height: 1.55; margin-top: 6px; max-width: 68ch; }
+
+/* T08 Closing */
+.s-close { display: grid; grid-template-columns: 1fr 1fr; padding: 0; }
+.close-left { background: var(--accent); color: #fff; padding: 28px 46px 28px 77px; display: flex; flex-direction: column; justify-content: space-between; position: relative; overflow: hidden; }
+.close-left canvas.ascii-bg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; opacity: .85; mix-blend-mode: screen; }
+.close-left > * { position: relative; z-index: 1; }
+.close-left .chrome-min { font-family: var(--mono); font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.62); display: flex; justify-content: space-between; }
+.close-left .manifesto { display: flex; flex-direction: column; gap: 14px; }
+.close-left .manifesto .meta { font-family: var(--mono); font-size: 13px; letter-spacing: .22em; text-transform: uppercase; color: rgba(255,255,255,.78); margin-bottom: 12px; }
+.close-left .manifesto h2 { font-family: var(--sans); font-size: 86px; line-height: .96; letter-spacing: -.025em; font-weight: 200; color: #fff; }
+.close-left .manifesto h2 em { font-style: italic; font-weight: 300; }
+.close-left .manifesto .sub { font-family: var(--sans); font-size: 14px; line-height: 1.6; color: rgba(255,255,255,.82); font-weight: 400; max-width: 36ch; margin-top: 10px; }
+.close-left .sig { display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid rgba(255,255,255,.22); padding-top: 14px; font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.62); }
+.close-right { background: var(--bg); color: var(--text); padding: 28px 77px 28px 46px; display: flex; flex-direction: column; justify-content: space-between; }
+.close-right .chrome-min { font-family: var(--mono); font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-3); display: flex; justify-content: space-between; }
+.close-right .takeaways { display: flex; flex-direction: column; gap: 0; }
+.close-right .take-item { display: grid; grid-template-columns: auto 1fr; gap: 26px; align-items: start; padding: 19px 0; border-top: 1px solid var(--line); }
+.close-right .take-item:last-child { border-bottom: 2px solid var(--accent); }
+.close-right .take-item .num { font-family: var(--sans); font-weight: 200; font-size: 56px; line-height: .9; color: var(--text); font-variant-numeric: tabular-nums; min-width: 2.2ch; }
+.close-right .take-item:last-child .num { color: var(--accent); }
+.close-right .take-item h3 { font-family: var(--sans); font-weight: 400; font-size: 23px; line-height: 1.2; letter-spacing: -.015em; margin-bottom: 7px; }
+.close-right .take-item:last-child h3 { color: var(--accent); }
+.close-right .take-item p { font-size: 16px; line-height: 1.6; color: var(--text-2); }
+.close-right .foot { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); text-align: right; }
+
+/* T23 Free Single - LangGraph Flow */
+.s-free { grid-template-rows: auto 1fr; gap: 24px; align-content: start; padding-top: 80px; padding-bottom: 84px; }
+.free-head { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 32px; }
+.free-head .h-1 { font-size: 48px; line-height: 1.1; margin-top: 12px; }
+.free-head .lead { max-width: 48ch; font-size: 14px; align-self: end; }
+.flow-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; }
+.flow-row { display: flex; align-items: center; gap: 0; justify-content: center; }
+.flow-node { padding: 10px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); font-family: var(--mono); font-size: 12px; color: var(--text); white-space: nowrap; transition: border-color .3s ease, background .3s ease; }
+.flow-node.accent { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.flow-node:hover { border-color: var(--accent); background: var(--accent-soft); }
+.flow-arrow { font-family: var(--mono); font-size: 16px; color: var(--line-strong); padding: 0 8px; }
+.flow-branch { display: flex; flex-direction: column; gap: 4px; align-items: center; padding: 0 4px; }
+.flow-branch .flow-node { font-size: 11px; padding: 8px 14px; }
+.flow-label { font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: .14em; text-transform: uppercase; }
+.flow-divider { width: 1px; height: 20px; background: var(--line); margin: 2px 0; }
+.flow-group { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.flow-loop-box { border: 1px dashed var(--line-strong); border-radius: 14px; padding: 16px 20px 12px; display: flex; flex-direction: column; align-items: center; gap: 10px; position: relative; }
+.flow-loop-box .flow-label { position: absolute; top: -8px; left: 16px; background: var(--bg); padding: 0 8px; }
+
+/* Motion */
+.glyph { display: inline-block; width: 10px; height: 10px; background: var(--accent); transform: rotate(45deg); vertical-align: middle; margin-right: 12px; }
+.slide.active .stagger > * { animation: rise .7s cubic-bezier(.2,.7,.15,1) both; }
+.slide.active .stagger > *:nth-child(1) { animation-delay: .05s; }
+.slide.active .stagger > *:nth-child(2) { animation-delay: .12s; }
+.slide.active .stagger > *:nth-child(3) { animation-delay: .19s; }
+.slide.active .stagger > *:nth-child(4) { animation-delay: .26s; }
+.slide.active .stagger > *:nth-child(5) { animation-delay: .33s; }
+.slide.active .stagger > *:nth-child(6) { animation-delay: .40s; }
+.slide.active .stagger > *:nth-child(7) { animation-delay: .47s; }
+.slide.active .stagger > *:nth-child(8) { animation-delay: .54s; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: none; }
+}
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+  <canvas class="ascii-bg" id="asciiBg" aria-hidden="true"></canvas>
+
+  <!-- Slide 1: T01 Cover -->
+  <section class="slide s-cover active">
+    <div class="cover-main stagger">
+      <span class="kicker">AI Interview Coach · Project Defense</span>
+      <div class="cover-chinese">
+        <span>AI 模拟</span>
+        <span>面试官</span>
+      </div>
+      <p class="cover-sub lead">基于 <em>LangGraph</em> 状态图驱动的智能面试陪练系统，实现简历解析、模拟面试、四维评分、报告生成与知识库沉淀的完整闭环。</p>
+    </div>
+    <div class="cover-meta">
+      <div>PROJECT <strong>AI 模拟面试官</strong></div>
+      <div>STACK <strong>FastAPI · Vue3 · LangGraph</strong></div>
+      <div>VERSION <strong>v0.10</strong></div>
+      <div>DATE <strong>2026.08</strong></div>
+    </div>
+  </section>
+
+  <!-- Slide 2: T02 Agenda -->
+  <section class="slide s-agenda">
+    <div class="agenda-side stagger">
+      <span class="kicker">Agenda · 答辩内容</span>
+      <h2 class="h-1">目录</h2>
+      <p class="lead">本次答辩围绕系统已实现的核心功能展开，覆盖架构设计、面试引擎、检索评分、鉴权体系与知识库闭环。</p>
+    </div>
+    <div class="agenda-list stagger">
+      <div class="agenda-item">
+        <span class="idx">01</span>
+        <span class="name">项目概述</span>
+        <span class="en">Overview</span>
+      </div>
+      <div class="agenda-item">
+        <span class="idx">02</span>
+        <span class="name">系统架构</span>
+        <span class="en">Architecture</span>
+      </div>
+      <div class="agenda-item">
+        <span class="idx">03</span>
+        <span class="name">面试引擎</span>
+        <span class="en">LangGraph Engine</span>
+      </div>
+      <div class="agenda-item">
+        <span class="idx">04</span>
+        <span class="name">检索与评分</span>
+        <span class="en">Retrieval & Scoring</span>
+      </div>
+      <div class="agenda-item">
+        <span class="idx">05</span>
+        <span class="name">鉴权与隔离</span>
+        <span class="en">Auth & Isolation</span>
+      </div>
+      <div class="agenda-item">
+        <span class="idx">06</span>
+        <span class="name">个人知识库</span>
+        <span class="en">Knowledge Base</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 3: T03 Brand - Project Overview -->
+  <section class="slide s-brand">
+    <div class="brand-left stagger">
+      <span class="kicker">01 / Overview</span>
+      <h1 class="h-1">项目概述</h1>
+      <p class="lead">面向应届生求职场景的 AI 模拟面试系统。通过 LangGraph 编排面试全流程，结合混合检索题库与四维评分模型，帮助候选人在真实面试前进行充分陪练与能力复盘。</p>
+      <div class="brand-stats">
+        <div><div class="k"><b>9</b></div><div class="lbl">覆盖岗位</div></div>
+        <div><div class="k"><b>133</b></div><div class="lbl">精选题库</div></div>
+        <div><div class="k"><b>4</b></div><div class="lbl">评分维度</div></div>
+      </div>
+    </div>
+    <div class="brand-cards stagger">
+      <div class="brand-card">
+        <div class="tag">01</div>
+        <div><div class="tag">CORE</div><div class="title">LangGraph 面试引擎</div><div class="desc">14 节点状态图，3 个 interrupt() 人在回路节点，WebSocket 流式输出</div></div>
+        <div class="badge">Engine</div>
+      </div>
+      <div class="brand-card">
+        <div class="tag">02</div>
+        <div><div class="tag">RETRIEVAL</div><div class="title">混合检索题库</div><div class="desc">BM25 关键词 + BGE 向量 + RRF 融合排序，Chroma 向量存储</div></div>
+        <div class="badge">Hybrid</div>
+      </div>
+      <div class="brand-card">
+        <div class="tag">03</div>
+        <div><div class="tag">AUTH</div><div class="title">JWT 用户体系</div><div class="desc">SQLite + bcrypt 密码哈希，全接口鉴权，数据按用户隔离</div></div>
+        <div class="badge">Secure</div>
+      </div>
+      <div class="brand-card">
+        <div class="tag">04</div>
+        <div><div class="tag">KB</div><div class="title">个人知识库闭环</div><div class="desc">双链笔记 + 知识图谱 + RAG 对话（会话持久化），薄弱点一键沉淀</div></div>
+        <div class="badge">闭环</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 4: T04 Grid Lines - Architecture -->
+  <section class="slide s-lines">
+    <div class="lines-head stagger">
+      <div>
+        <span class="kicker">02 / Architecture</span>
+        <h1 class="h-1">系统架构</h1>
+      </div>
+      <p class="lead">前后端分离架构：FastAPI 提供 REST + WebSocket 接口，Vue 3 SPA 承载交互界面，检索引擎与鉴权体系作为独立模块横切全栈。</p>
+    </div>
+    <div class="lines-grid stagger">
+      <div class="line-cell">
+        <span class="num">01</span>
+        <div class="head">
+          <div class="name">后端服务</div>
+          <div class="micro-rule"></div>
+          <div class="en">Backend · FastAPI</div>
+        </div>
+        <div class="desc"><em>FastAPI</em> 提供 REST API 与 WebSocket 实时通信；<em>LangGraph</em> StateGraph 编排 14 节点面试流程；MemorySaver 按线程保存暂停点</div>
+        <div class="foot"><span class="glyph"></span><span class="accent">API · WS · Graph</span></div>
+      </div>
+      <div class="line-cell">
+        <span class="num">02</span>
+        <div class="head">
+          <div class="name">前端应用</div>
+          <div class="micro-rule"></div>
+          <div class="en">Frontend · Vue 3</div>
+        </div>
+        <div class="desc"><em>Vue 3</em> + Vite 构建 SPA；ECharts 雷达图可视化评分；Cytoscape.js 知识图谱；vditor 笔记编辑器</div>
+        <div class="foot"><span class="glyph"></span><span class="accent">SPA · Charts · Graph</span></div>
+      </div>
+      <div class="line-cell">
+        <span class="num">03</span>
+        <div class="head">
+          <div class="name">检索引擎</div>
+          <div class="micro-rule"></div>
+          <div class="en">Retrieval · Hybrid</div>
+        </div>
+        <div class="desc"><em>BGE 向量模型</em> (bge-base-zh-v1.5) + <em>BM25</em> 关键词检索 + <em>RRF</em> 融合排序；jieba 中文分词；Chroma 向量库</div>
+        <div class="foot"><span class="glyph"></span><span class="accent">BM25 · BGE · RRF</span></div>
+      </div>
+      <div class="line-cell">
+        <span class="num">04</span>
+        <div class="head">
+          <div class="name">数据与鉴权</div>
+          <div class="micro-rule"></div>
+          <div class="en">Auth · JWT + SQLite</div>
+        </div>
+        <div class="desc"><em>JWT</em> (HS256, 24h) 签发与校验；<em>SQLite</em> 存储用户表与知识库；bcrypt 密码哈希；全接口与 WS 握手鉴权</div>
+        <div class="foot"><span class="glyph"></span><span class="accent">JWT · bcrypt · SQLite</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 5: T23 Free Single - LangGraph Flow -->
+  <section class="slide s-free">
+    <div class="free-head stagger">
+      <div>
+        <span class="kicker">03 / LangGraph Engine</span>
+        <h1 class="h-1">面试引擎流程</h1>
+      </div>
+      <p class="lead">LangGraph StateGraph 将面试拆分为 14 个独立节点，3 个 interrupt() 等待节点实现人在回路。恢复回答时从等待节点重跑，不重复选题或输出。开场白与首题分离输出，禁止题号等元数据泄露。</p>
+    </div>
+    <div class="flow-wrap stagger">
+      <div class="flow-group">
+        <div class="flow-row">
+          <div class="flow-node accent">configure</div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node accent">opening</div>
+        </div>
+        <span class="flow-arrow">↓</span>
+      </div>
+      <div class="flow-loop-box">
+        <span class="flow-label">面试循环 · 每题一轮</span>
+        <div class="flow-group">
+          <div class="flow-row">
+            <div class="flow-node">prepare_question</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-node accent">emit_question</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-node accent" style="border-style: dashed;">wait_answer</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-node">score_initial</div>
+          </div>
+          <span class="flow-arrow">↓</span>
+          <div class="flow-branch">
+            <span class="flow-label">3 ≤ score &lt; 7 触发追问</span>
+            <div class="flow-row">
+              <div class="flow-node">prepare_followup</div>
+              <span class="flow-arrow">→</span>
+              <div class="flow-node accent">emit_followup</div>
+              <span class="flow-arrow">→</span>
+              <div class="flow-node accent" style="border-style: dashed;">wait_followup</div>
+              <span class="flow-arrow">→</span>
+              <div class="flow-node">score_combined</div>
+            </div>
+          </div>
+          <span class="flow-arrow">↓</span>
+          <div class="flow-node">finalize_question</div>
+        </div>
+      </div>
+      <span class="flow-arrow">↓</span>
+      <div class="flow-group">
+        <div class="flow-row">
+          <div class="flow-node accent">closing</div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node accent" style="border-style: dashed;">wait_report</div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node accent">summary</div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node" style="background: var(--accent); color: #fff; border-color: var(--accent);">END</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 6: T05 Team Cards - Retrieval & Scoring -->
+  <section class="slide s-team">
+    <div class="stagger">
+      <span class="kicker">04 / Retrieval & Scoring</span>
+      <h1 class="h-1">检索与评分</h1>
+      <p class="lead">混合检索保证出题精准度，四维评分模型从多维度量化候选人表现，追问机制与提示系统形成完整的自适应面试闭环。</p>
+    </div>
+    <div class="team-cards stagger">
+      <div class="team-card">
+        <span class="idx">— 01</span>
+        <div class="title">混合检索出题</div>
+        <div class="en-sub">BM25 + Vector + RRF</div>
+        <div class="desc">BM25 关键词检索与 BGE 向量相似度通过 RRF 公式融合排序，按岗位/难度/分类多维过滤，排除已出题目避免重复</div>
+      </div>
+      <div class="team-card">
+        <span class="idx">— 02</span>
+        <div class="title">四维评分模型</div>
+        <div class="en-sub">Accuracy · Completeness · Depth · Clarity</div>
+        <div class="desc">LLM 按标准答案 + 得分点评分，输出准确性/完整性/深度/清晰度四维分数；总分与四维均值校准防自相矛盾</div>
+      </div>
+      <div class="team-card">
+        <span class="idx">— 03</span>
+        <div class="title">追问与合并重评</div>
+        <div class="en-sub">Followup · Combined Scoring</div>
+        <div class="desc">初始得分 3-6 分触发针对性追问，追问后拼接两段回答合并重评；低于 3 分或高于 7 分直接进入下一题</div>
+      </div>
+      <div class="team-card">
+        <span class="idx">— 04</span>
+        <div class="title">反幻觉与对话记忆</div>
+        <div class="en-sub">Anti-Hallucination · Memory</div>
+        <div class="desc">出题衔接只读候选人原文，切断评分产出回流；话题级摘要护栏禁止逐字引用，窗口内精准回指具体内容</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 7: T06 Refine List - Auth & Isolation -->
+  <section class="slide s-refine">
+    <div class="stagger">
+      <span class="kicker">05 / Auth & Isolation</span>
+      <h1 class="h-1">鉴权与隔离</h1>
+      <p class="lead">生产级 JWT 用户体系，全接口与 WebSocket 握手鉴权，报告/会话/知识库均按用户隔离，杜绝跨用户数据泄露。</p>
+    </div>
+    <div class="refine-list stagger">
+      <div class="refine-item">
+        <span class="idx"><b>01</b> · AUTH</span>
+        <div><div class="h">JWT 签发与校验</div><div class="d">HS256 签名，默认 24h 过期；除 login/register 外所有 REST 接口经 Depends(get_current_user) 校验 Bearer Token</div></div>
+      </div>
+      <div class="refine-item">
+        <span class="idx"><b>02</b> · USER</span>
+        <div><div class="h">用户注册与密码安全</div><div class="d">SQLite users.db 存储用户表，bcrypt 密码哈希加盐；用户名 3-20 位规则校验，预置演示账号 admin/123123</div></div>
+      </div>
+      <div class="refine-item">
+        <span class="idx"><b>03</b> · REPORT</span>
+        <div><div class="h">报告按用户隔离</div><div class="d">报告 JSON 写入 username 字段；/api/reports 列表与详情/雷达仅返回归属用户的报告；旧报告无 username 字段归 admin</div></div>
+      </div>
+      <div class="refine-item">
+        <span class="idx"><b>04</b> · SESSION</span>
+        <div><div class="h">WebSocket 会话隔离</div><div class="d">WS 握手需 ?token=jwt，无效拒绝握手 (HTTP 403)；恢复他人 thread_id 被拒绝；会话列表按 username 过滤</div></div>
+      </div>
+      <div class="refine-item">
+        <span class="idx"><b>05</b> · KB</span>
+        <div><div class="h">知识库按用户隔离</div><div class="d">knowledge.db 按 username 分区；向量库 kb_chroma 独立于题库 chroma_db；笔记/图谱/RAG 问答全链路用户隔离</div></div>
+      </div>
+      <div class="refine-item">
+        <span class="idx"><b>06</b> · RECORD</span>
+        <div><div class="h">面试记录管理</div><div class="d">DELETE 接口支持记录删除，文件名正则校验防路径穿越；记录头标注用户归属，非本人返回 404；前端悬停删除+确认</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 8: T04 Grid Lines - Knowledge Base -->
+  <section class="slide s-lines">
+    <div class="lines-head stagger">
+      <div>
+        <span class="kicker">06 / Knowledge Base</span>
+        <h1 class="h-1">个人知识库</h1>
+      </div>
+      <p class="lead">面试报告薄弱点一键沉淀进知识库，形成「面试 → 复盘 → 学习 → 再面试」的成长闭环。支持双链笔记、知识图谱、RAG 问答与文件批量入库。</p>
+    </div>
+    <div class="lines-grid stagger">
+      <div class="line-cell">
+        <span class="num">01</span>
+        <div class="head">
+          <div class="name">双链笔记</div>
+          <div class="micro-rule"></div>
+          <div class="en">Bi-linked Notes</div>
+        </div>
+        <div class="desc"><em>[[wiki]]</em> 语法双向链接；笔记表不存边，链接为解析衍生视图；编辑器侧栏实时显示反向链接</div>
+        <div class="foot"><span class="glyph"></span><span class="accent">CRUD · Wiki · Backlinks</span></div>
+      </div>
+      <div class="line-cell">
+        <span class="num">02</span>
+        <div class="head">
+          <div class="name">知识图谱</div>
+          <div class="micro-rule"></div>
+          <div class="en">Knowledge Graph</div>
+        </div>
+        <div class="desc"><em>Cytoscape.js</em> 力导向布局；节点大小=连接数；hover 高亮邻居；虚节点=链接到不存在的标题，点击即创建</div>
+        <div class="foot"><span class="glyph"></span><span class="accent">Force · Semantic · Virtual</span></div>
+      </div>
+      <div class="line-cell">
+        <span class="num">03</span>
+        <div class="head">
+          <div class="name">RAG 问答</div>
+          <div class="micro-rule"></div>
+          <div class="en">Retrieval Augmented QA</div>
+        </div>
+        <div class="desc"><em>RAG 对话</em> 双栏布局，SQLite 持久化会话与消息；检索回查笔记全文（4000字/条）；参考来源卡片可跳转；sparse 提示导入</div>
+        <div class="foot"><span class="glyph"></span><span class="accent">Search · LLM · Persist</span></div>
+      </div>
+      <div class="line-cell">
+        <span class="num">04</span>
+        <div class="head">
+          <div class="name">文件入库</div>
+          <div class="micro-rule"></div>
+          <div class="en">File Upload & Structure</div>
+        </div>
+        <div class="desc">多文件批量上传 → 模型提取原文 → <em>LLM 结构化</em> 建笔记 → 向量同步；AI 自动分类与内容整理</div>
+        <div class="foot"><span class="glyph"></span><span class="accent">Extract · Structure · Sync</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 9: T08 Closing -->
+  <section class="slide s-close">
+    <div class="close-left">
+      <canvas class="ascii-bg" aria-hidden="true"></canvas>
+      <div class="chrome-min"><span>09 / 09</span><span>Closing</span></div>
+      <div class="manifesto stagger">
+        <div class="meta">Project Defense</div>
+        <h2>让每一次练习，<br>都离 <em>offer</em><br>更近一步</h2>
+        <div class="sub">从简历解析到知识库沉淀，AI 模拟面试官构建了完整的面试陪练成长闭环。</div>
+      </div>
+      <div class="sig"><span>AI Interview Coach</span><span>2026.08</span></div>
+    </div>
+    <div class="close-right">
+      <div class="chrome-min"><span>Takeaways</span><span>03 Points</span></div>
+      <div class="takeaways stagger">
+        <div class="take-item">
+          <div class="num">01</div>
+          <div>
+            <h3>完整面试闭环</h3>
+            <p>简历解析 → 岗位匹配 → 模拟面试 → 四维评分 → 报告生成 → 薄弱点沉淀知识库，覆盖求职陪练全链路。</p>
+          </div>
+        </div>
+        <div class="take-item">
+          <div class="num">02</div>
+          <div>
+            <h3>LangGraph 状态图驱动</h3>
+            <p>14 节点 StateGraph + 3 个 interrupt() 人在回路，WebSocket 流式输出，MemorySaver 按线程保存暂停点。</p>
+          </div>
+        </div>
+        <div class="take-item">
+          <div class="num">03</div>
+          <div>
+            <h3>反幻觉与知识库闭环</h3>
+            <p>评分产出不回流出题衔接，模型分层 fast/strong；RAG 对话持久化并回查笔记全文，面试记录可删除，开场白与首题分离输出。</p>
+          </div>
+        </div>
+      </div>
+      <div class="foot">→ Thank You · Q&A</div>
+    </div>
+  </section>
+
+  <!-- Chrome -->
+  <div class="chrome-top">
+    <span class="mark"><span class="dot"></span>AI 模拟面试官 · <span class="en">Project Defense</span></span>
+    <span>2026 · 08 · Defense</span>
+  </div>
+  <div class="chrome-bottom">
+    <span>AI Interview Coach · <span class="en">SmartSteer</span></span>
+    <span class="page"><span class="num" id="pageNum">01</span><span class="sep"></span><span>09</span></span>
+  </div>
+  <div class="nav" id="nav"></div>
+</div>
+
+<script>
+// ASCII Breathing-field
+(function(){
+  const canvas = document.getElementById('asciiBg');
+  if(!canvas) return;
+  const PALETTE = '   ...:::---+++***';
+  const CELL = 16;
+  const FONT_SIZE = 13;
+  let ctx, w, h, dpr, cols, rows;
+  let t0 = performance.now();
+
+  function setup(){
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w = 1280; h = 720;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = '500 ' + FONT_SIZE + 'px JetBrains Mono, monospace';
+    ctx.textBaseline = 'top';
+    cols = Math.ceil(w / CELL); rows = Math.ceil(h / CELL);
+  }
+
+  function draw(t){
+    if(!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+    for(let r = 0; r < rows; r++){
+      for(let c = 0; c < cols; c++){
+        const n = (Math.sin(c * 0.18 + t) + Math.sin(r * 0.24 - t * 0.7) + Math.sin((c + r) * 0.12 + t * 0.45) + Math.sin(Math.hypot(c - cols * 0.5, r - rows * 0.5) * 0.16 - t * 0.55)) / 4;
+        const v = (n + 1) / 2;
+        if(v < 0.22) continue;
+        const idx = Math.min(PALETTE.length - 1, Math.floor(v * PALETTE.length));
+        const ch = PALETTE[idx];
+        if(ch === ' ') continue;
+        ctx.fillStyle = 'rgba(75, 63, 227, ' + (0.03 + (v - 0.22) * 0.12).toFixed(3) + ')';
+        ctx.fillText(ch, c * CELL, r * CELL);
+      }
+    }
+  }
+
+  function tick(now){
+    draw((now - t0) / 1000 * 0.55);
+    requestAnimationFrame(tick);
+  }
+
+  window.addEventListener('resize', () => requestAnimationFrame(setup), {passive: true});
+  setup();
+  requestAnimationFrame(tick);
+})();
+
+// Close-left ASCII
+(function(){
+  const canvas = document.querySelector('.close-left canvas.ascii-bg');
+  if(!canvas) return;
+  const PALETTE = '   ...:::---+++***';
+  const CELL = 14;
+  let ctx, w, h, dpr, cols, rows;
+  let t0 = performance.now();
+
+  function setup(){
+    const rect = canvas.parentElement.getBoundingClientRect();
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w = rect.width; h = rect.height;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = '500 12px JetBrains Mono, monospace';
+    ctx.textBaseline = 'top';
+    cols = Math.ceil(w / CELL); rows = Math.ceil(h / CELL);
+  }
+
+  function draw(t){
+    if(!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+    for(let r = 0; r < rows; r++){
+      for(let c = 0; c < cols; c++){
+        const n = (Math.sin(c * 0.2 + t) + Math.sin(r * 0.26 - t * 0.7) + Math.sin((c + r) * 0.14 + t * 0.5) + Math.sin(Math.hypot(c - cols * 0.5, r - rows * 0.5) * 0.18 - t * 0.6)) / 4;
+        const v = (n + 1) / 2;
+        if(v < 0.2) continue;
+        const idx = Math.min(PALETTE.length - 1, Math.floor(v * PALETTE.length));
+        const ch = PALETTE[idx];
+        if(ch === ' ') continue;
+        ctx.fillStyle = 'rgba(255, 255, 255, ' + (0.08 + (v - 0.2) * 0.35).toFixed(3) + ')';
+        ctx.fillText(ch, c * CELL, r * CELL);
+      }
+    }
+  }
+
+  function tick(now){
+    draw((now - t0) / 1000 * 0.5);
+    requestAnimationFrame(tick);
+  }
+
+  window.addEventListener('resize', () => requestAnimationFrame(setup), {passive: true});
+  setup();
+  requestAnimationFrame(tick);
+})();
+
+// Navigation
+const deck = document.getElementById('deck');
+const slides = Array.from(deck.querySelectorAll('.slide'));
+const nav = document.getElementById('nav');
+const pageNum = document.getElementById('pageNum');
+let current = 0;
+
+function fitDeck() {
+  const s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+  deck.style.transform = 'translate(-50%,-50%) scale(' + s + ')';
+}
+window.addEventListener('resize', fitDeck, { passive: true });
+fitDeck();
+
+slides.forEach((_, i) => {
+  const b = document.createElement('i');
+  if (i === 0) b.classList.add('active');
+  b.addEventListener('click', () => goTo(i));
+  nav.appendChild(b);
+});
+
+function goTo(idx) {
+  idx = Math.max(0, Math.min(slides.length - 1, idx));
+  if (idx === current) return;
+  slides[current].classList.remove('active');
+  slides[idx].classList.add('active');
+  nav.children[current].classList.remove('active');
+  nav.children[idx].classList.add('active');
+  current = idx;
+  pageNum.textContent = String(idx + 1).padStart(2, '0');
+}
+function go(delta) { goTo(current + delta); }
+
+document.addEventListener('keydown', (e) => {
+  if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); go(1); }
+  if (['ArrowLeft', 'PageUp'].includes(e.key))         { e.preventDefault(); go(-1); }
+  if (e.key === 'Home') goTo(0);
+  if (e.key === 'End') goTo(slides.length - 1);
+});
+
+let wheelLock = false;
+document.addEventListener('wheel', (e) => {
+  if (wheelLock) return;
+  if (Math.abs(e.deltaY) < 30) return;
+  wheelLock = true;
+  go(e.deltaY > 0 ? 1 : -1);
+  setTimeout(() => wheelLock = false, 700);
+}, { passive: true });
+
+let touchY = 0;
+document.addEventListener('touchstart', (e) => { touchY = e.touches[0].clientY; }, { passive: true });
+document.addEventListener('touchend', (e) => {
+  const dy = touchY - e.changedTouches[0].clientY;
+  if (Math.abs(dy) > 40) go(dy > 0 ? 1 : -1);
+}, { passive: true });
+</script>
+</body>
+</html>

@@ -68,13 +68,16 @@ async function loadRoles() {
 }
 
 function selectRole(role) {
-  sessionStorage.setItem('selectedRole', JSON.stringify({
+  const config = {
     key: role.key,
     title: role.title,
     resumeContext: resumeData.value?.resume_context || '',
     resumeSkills: resumeData.value?.skills || [],
     questionCount: 5,
-  }))
+  }
+  sessionStorage.setItem('selectedRole', JSON.stringify(config))
+  // 记住最近一次面试配置 (含简历上下文), 刷新面试页可直接续上
+  localStorage.setItem('interviewConfig', JSON.stringify(config))
   router.push('/interview')
 }
 

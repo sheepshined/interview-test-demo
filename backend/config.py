@@ -51,7 +51,8 @@ LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
 
 # ---- 视觉模型 (千问 qwen-vl, 扫描件简历解析兜底; 未配置 Key 则该路径自动禁用) ----
-DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+# 兼容 .env 中的 ALIYUN_API_KEY 命名 (百炼/DashScope 同为阿里云模型平台, key 通用)
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY") or os.getenv("ALIYUN_API_KEY", "")
 VISION_MODEL = os.getenv("VISION_MODEL", "qwen-vl-plus")
 VISION_BASE_URL = os.getenv(
     "VISION_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -69,62 +70,46 @@ LLM_RETRY_DELAY = 1.0
 
 # ==================== CORS 配置 ====================
 # 开发态允许的前端来源 (逗号分隔); 生产态按需收紧
+# 8899 = THINK 工作台本地服务; null = file:// 直开场景 (THINK 双击 index.html)
 CORS_ORIGINS = [
     o.strip() for o in os.getenv(
         "CORS_ORIGINS",
-        "http://localhost:5173,http://localhost:3000,http://localhost:8080",
+        "http://localhost:5173,http://localhost:3000,http://localhost:8080,"
+        "http://localhost:8899,http://127.0.0.1:8899,null",
     ).split(",") if o.strip()
 ]
+
+# ==================== 评分校准 (v0.9) ====================
+# 评分自一致性采样次数: 同一答案独立评分 N 次取中位数, 1 = 关闭(单次)
+SCORING_SAMPLES = max(1, int(os.getenv("SCORING_SAMPLES", "3")))
+
+# ==================== 认证配置 (v0.6) ====================
+# 用户库 SQLite 路径 (测试用 AUTH_DB_PATH 环境变量覆盖到临时目录)
+AUTH_DB_PATH = os.getenv("AUTH_DB_PATH", os.path.join(BASE_DIR, "users.db"))
+# JWT 签名密钥: .env 未配置时 auth.py 自动生成并落盘 backend/.jwt_secret
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+TOKEN_EXPIRE_HOURS = int(os.getenv("TOKEN_EXPIRE_HOURS", "24"))
+
+# ==================== 会话持久化 (v0.9) ====================
+# LangGraph checkpointer 的 SQLite 库, 后端重启后未结束的面试可续接
+CHECKPOINT_DB_PATH = os.getenv("CHECKPOINT_DB_PATH", os.path.join(BASE_DIR, "checkpoints.db"))
+
+# ==================== 知识库配置 (v0.7/v0.8) ====================
+# 个人知识库 SQLite 路径 (测试用 KB_DB_PATH 环境变量覆盖到临时目录)
+KB_DB_PATH = os.getenv("KB_DB_PATH", os.path.join(BASE_DIR, "knowledge.db"))
+# 知识库向量库目录 (v0.8: kb_notes 集合, 与题库 interview_questions 完全隔离)
+KB_CHROMA_PATH = os.getenv("KB_CHROMA_PATH", os.path.join(BASE_DIR, "kb_chroma"))
 
 # ==================== Memory 配置 ====================
 MEMORY_WINDOW_SIZE = 10         # 保留最近 N 条消息
 MEMORY_COMPRESS_THRESHOLD = 6000  # 对话超过此字符数时触发摘要压缩
 
 # ==================== 面试角色配置 ====================
+# 2026-09-13 起专注大模型应用开发专场，其余岗位题库保留在 data_disabled/ 可随时恢复
 ROLES = {
-    "python_dev": {
-        "title": "Python 开发工程师",
-        "tags": ["Python", "Django", "Flask", "FastAPI", "数据库", "异步编程"],
-        "file": "python_dev.md",
-    },
-    "java_dev": {
-        "title": "Java 开发工程师",
-        "tags": ["Java", "Spring", "MyBatis", "JVM", "微服务", "并发编程"],
-        "file": "java_dev.md",
-    },
-    "frontend_dev": {
-        "title": "前端开发工程师",
-        "tags": ["JavaScript", "Vue", "React", "CSS", "TypeScript", "性能优化"],
-        "file": "frontend_dev.md",
-    },
-    "product_manager": {
-        "title": "产品经理",
-        "tags": ["需求分析", "PRD", "用户研究", "数据分析", "竞品分析"],
-        "file": "product_manager.md",
-    },
-    "general_hr": {
-        "title": "通用能力面试",
-        "tags": ["沟通表达", "项目经验", "问题解决", "团队协作", "职业规划"],
-        "file": "general_hr.md",
-    },
-    "algorithm": {
-        "title": "算法工程师",
-        "tags": ["算法", "数据结构", "动态规划", "排序", "复杂度"],
-        "file": "algorithm.md",
-    },
-    "devops": {
-        "title": "运维工程师",
-        "tags": ["Linux", "Docker", "Kubernetes", "CI/CD", "Nginx", "监控"],
-        "file": "devops.md",
-    },
-    "data_analyst": {
-        "title": "数据分析师",
-        "tags": ["SQL", "Python", "统计", "数据分析", "可视化"],
-        "file": "data_analyst.md",
-    },
     "llm_app": {
         "title": "大模型应用开发工程师",
-        "tags": ["Agent", "RAG", "大模型", "Prompt工程", "向量检索", "工具调用", "Embedding", "LangChain"],
+        "tags": ["RAG", "Agent", "Transformer", "微调", "提示词工程", "MCP", "工具调用", "Memory", "部署", "LangChain"],
         "file": "llm_app.md",
     },
 }

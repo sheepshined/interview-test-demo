@@ -1,4 +1,5 @@
 import { ref, computed, onUnmounted, reactive } from 'vue'
+import { getToken } from '../auth'
 
 export function useWebSocket() {
   const ws = ref(null)
@@ -102,7 +103,10 @@ export function useWebSocket() {
     connectionError.value = ''
     return new Promise((resolve, reject) => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const socket = new WebSocket(`${protocol}//${window.location.host}/ws/chat`)
+      // 握手鉴权: 后端要求 ?token=<jwt>, 无效 token 会拒绝握手
+      const token = getToken()
+      const qs = token ? `?token=${encodeURIComponent(token)}` : ''
+      const socket = new WebSocket(`${protocol}//${window.location.host}/ws/chat${qs}`)
       ws.value = socket
       let settled = false
       const timer = window.setTimeout(() => {

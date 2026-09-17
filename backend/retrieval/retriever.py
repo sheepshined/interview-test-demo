@@ -311,6 +311,26 @@ class HybridRetriever:
         self._answer_cache[question_id] = result
         return result
 
+    def get_question_by_id(self, question_id: str) -> Optional[Dict]:
+        """按题号精确取题 (不含标准答案, 供演示固定首题等场景)"""
+        results = self.vectorstore._collection.get(
+            ids=[question_id],
+            include=["documents", "metadatas"],
+        )
+        if not results["ids"]:
+            return None
+        meta = results["metadatas"][0] or {}
+        return {
+            "id": results["ids"][0],
+            "question": results["documents"][0],
+            "role": meta.get("role", ""),
+            "category": meta.get("category", ""),
+            "difficulty": meta.get("difficulty", 2),
+            "difficulty_label": meta.get("difficulty_label", "中级"),
+            "type": meta.get("type", "knowledge"),
+            "scenario": meta.get("scenario", ""),
+        }
+
     def get_categories(self, role: str = None) -> List[str]:
         """获取某岗位的所有分类"""
         where_filter = {"role": role} if role else None

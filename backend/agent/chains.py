@@ -27,8 +27,9 @@ from agent.prompts import (
     opening_prompt,
     closing_prompt,
     hint_prompt,
+    project_question_prompt,
 )
-from agent.models import ScoreResult
+from agent.models import ScoreResult, ProjectQuestion
 
 
 # ============================================================
@@ -269,3 +270,25 @@ def build_hint_chain(llm: BaseChatModel):
         question, standard_answer, hint_level (1 or 2), candidate_answer
     """
     return hint_prompt | llm | StrOutputParser()
+
+
+# ============================================================
+#  Chain: 项目深挖出题 (v0.9, mode=project)
+# ============================================================
+
+def build_project_question_chain(llm: BaseChatModel):
+    """构建项目深挖出题 Chain
+
+    Chain: project_question_prompt | llm | StrOutputParser
+
+    输入参数:
+        resume_context, role_title, question_index, prev_questions, format_instructions
+    """
+    return project_question_prompt | llm | StrOutputParser()
+
+
+def get_project_format_instructions() -> str:
+    """项目深挖 JSON 格式指令"""
+    from langchain_core.output_parsers import PydanticOutputParser
+    parser = PydanticOutputParser(pydantic_object=ProjectQuestion)
+    return parser.get_format_instructions()

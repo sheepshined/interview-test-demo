@@ -11,6 +11,7 @@ export default defineConfig({
     proxy: {
       '/api': { target: backendTarget, changeOrigin: true },
       '/ws': { target: websocketTarget, ws: true },
+      '/kb_files': { target: backendTarget, changeOrigin: true },
     },
   },
 })

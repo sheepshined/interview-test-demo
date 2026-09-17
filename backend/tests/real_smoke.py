@@ -15,6 +15,13 @@ WS_URL = "ws://127.0.0.1:8000/ws/chat"
 API_URL = "http://127.0.0.1:8000/api"
 
 
+def get_token() -> str:
+    """登录演示账号获取 JWT (WS 握手鉴权用)。"""
+    resp = httpx.post(f"{API_URL}/login", json={"username": "admin", "password": "123123"})
+    resp.raise_for_status()
+    return resp.json()["token"]
+
+
 def load_reference_answers() -> dict[str, str]:
     """读取题库参考答案，让第二题稳定模拟一份正常、完整的回答。"""
     question_bank = Path(__file__).parents[1] / "data" / "python_dev.md"
@@ -38,7 +45,9 @@ async def run_smoke() -> None:
     answered_followups = set()
     report_requested = False
 
-    async with websockets.connect(WS_URL, max_size=2_000_000) as socket:
+    async with websockets.connect(
+        f"{WS_URL}?token={get_token()}", max_size=2_000_000
+    ) as socket:
         await socket.send(json.dumps({
             "type": "config",
             "role": "python_dev",

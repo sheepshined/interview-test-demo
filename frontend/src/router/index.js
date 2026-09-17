@@ -8,7 +8,14 @@ const routes = [
   { path: '/job-matching', name: 'JobMatching', component: () => import('../views/JobMatchingView.vue') },
   { path: '/interview', name: 'Interview', component: () => import('../views/InterviewView.vue') },
   { path: '/choose-job', name: 'ChooseJob', component: () => import('../views/ChooseJobView.vue') },
+  { path: '/interview-records', name: 'InterviewRecords', component: () => import('../views/InterviewRecordsView.vue') },
   { path: '/summary/:reportId', name: 'Summary', component: () => import('../views/SummaryView.vue') },
+  // 个人知识库 (v0.7)
+  { path: '/knowledge', name: 'Knowledge', component: () => import('../views/knowledge/KnowledgeView.vue') },
+  { path: '/knowledge/graph', name: 'KnowledgeGraph', component: () => import('../views/knowledge/GraphView.vue') },
+  { path: '/knowledge/chat', name: 'KbChat', component: () => import('../views/knowledge/KbChatView.vue') },
+  { path: '/knowledge/note/:id', name: 'NoteEditor', component: () => import('../views/knowledge/NoteEditorView.vue') },
+  { path: '/knowledge/new', name: 'NoteNew', component: () => import('../views/knowledge/NoteEditorView.vue') },
 ]
 
 const router = createRouter({ history: createWebHistory(), routes })

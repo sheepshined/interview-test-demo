@@ -26,23 +26,90 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 import config
+from common import extract_json_object
 from agent.chains import (
     build_closing_chain,
     build_followup_chain,
     build_opening_chain,
+    build_project_question_chain,
     build_question_chain,
     build_scoring_chain,
     build_summary_chain,
     get_format_instructions,
+    get_project_format_instructions,
 )
 from agent.llm import get_fast_llm, get_strong_llm
 from agent.memory import InterviewMemory
-from agent.models import ScoreResult
+from agent.models import ScoreResult, ScoreBreakdown
 from agent.state import InterviewState
 if TYPE_CHECKING:
     from retrieval.retriever import HybridRetriever
 
 logger = logging.getLogger(__name__)
+
+# 演示固定首题 (面试演示用小手脚): 指定岗位的第一题固定出该题, 之后恢复随机
+# 置空 DEMO_FIRST_QUESTION_ID 即可关闭
+DEMO_FIRST_QUESTION_ROLE = "llm_app"
+DEMO_FIRST_QUESTION_ID = "llm_rag_012"
+
+
+def _merge_score_samples(samples: List[ScoreResult]) -> ScoreResult:
+    """评分自一致性合并 (v0.9):
+
+    同一份回答独立评分 N 次后:
+      - 总分与四维: 各自取中位数 (int(x+0.5) 四舍五入)
+      - 得分点: 按"出现次数 ≥ 过半采样"归入 hit_points, 否则 missed_points
+        (以第一次出现的措辞为准, 避免同义改写重复)
+      - feedback: 取总分等于中位数的第一份采样
+      - is_correct: 由中位分判定
+    """
+    if not samples:
+        return ScoreResult(score=0, max_score=10,
+                           score_breakdown=ScoreBreakdown(accuracy=0, completeness=0, depth=0, clarity=0),
+                           feedback="无评分结果", is_correct=False)
+    if len(samples) == 1:
+        return samples[0]
+
+    def median(vals: List[int]) -> int:
+        s = sorted(vals)
+        n = len(s)
+        mid = s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+        return int(mid + 0.5)
+
+    med_score = median([r.score for r in samples])
+    breakdown = ScoreBreakdown(
+        accuracy=median([r.score_breakdown.accuracy for r in samples]),
+        completeness=median([r.score_breakdown.completeness for r in samples]),
+        depth=median([r.score_breakdown.depth for r in samples]),
+        clarity=median([r.score_breakdown.clarity for r in samples]),
+    )
+
+    def norm(p: str) -> str:
+        return re.sub(r"\s+", "", p or "")[:60]
+
+    threshold = len(samples) / 2
+    hit_counts: Dict[str, Dict] = {}
+    missed_counts: Dict[str, Dict] = {}
+    for r in samples:
+        for p in r.hit_points:
+            hit_counts.setdefault(norm(p), {"text": p, "n": 0})["n"] += 1
+        for p in r.missed_points:
+            missed_counts.setdefault(norm(p), {"text": p, "n": 0})["n"] += 1
+    # 同一条目可能一份采样判命中、另一份判未命中 → 以更多采样的一方为准
+    hit_points = [v["text"] for v in hit_counts.values() if v["n"] >= threshold]
+    missed_points = [v["text"] for v in missed_counts.values() if v["n"] >= threshold
+                     and norm(v["text"]) not in {norm(h) for h in hit_points}]
+
+    feedback = next((r.feedback for r in samples if r.score == med_score and r.feedback), samples[0].feedback)
+    return ScoreResult(
+        score=med_score,
+        max_score=samples[0].max_score,
+        score_breakdown=breakdown,
+        hit_points=hit_points,
+        missed_points=missed_points,
+        feedback=feedback,
+        is_correct=med_score >= 5,
+    )
 
 
 async def _stream_chain(
@@ -325,6 +392,8 @@ def build_interview_graph(
     summary_chain = build_summary_chain(strong_llm)
     # 报告兜底链: 强模型不可用时降级用快速模型生成 AI 评价(见 summary_node)
     summary_fallback_chain = build_summary_chain(fast_llm)
+    # 项目深挖出题链 (v0.9, mode=project): 按简历生成追问, 不走题库
+    project_question_chain = build_project_question_chain(fast_llm)
 
     # ---- 对话记忆(进程内, 按 thread_id 隔离) ----
     # InterviewMemory 不可序列化, 不进 InterviewState(否则 checkpointer 报错)。
@@ -382,14 +451,18 @@ def build_interview_graph(
             )
             scoring_instruction = ""
         try:
-            score_result: ScoreResult = scoring_chain.invoke({
-                "question": answer_data["question"],
-                "standard_answer": answer_data["standard_answer"],
-                "scoring_points": scoring_points_text,
-                "scoring_instruction": scoring_instruction,
-                "candidate_answer": candidate_answer,
-                "format_instructions": get_format_instructions(),
-            })
+            # ---- 评分自一致性 (v0.9): 独立评分 N 次取中位数, 抑制单次抽风 ----
+            samples: List[ScoreResult] = []
+            for _ in range(max(1, config.SCORING_SAMPLES)):
+                samples.append(scoring_chain.invoke({
+                    "question": answer_data["question"],
+                    "standard_answer": answer_data["standard_answer"],
+                    "scoring_points": scoring_points_text,
+                    "scoring_instruction": scoring_instruction,
+                    "candidate_answer": candidate_answer,
+                    "format_instructions": get_format_instructions(),
+                }))
+            score_result = _merge_score_samples(samples)
             return score_result.to_record()
         except Exception as exc:
             logger.warning("题目 %s 评分失败: %s", question.get("id", ""), exc)
@@ -409,9 +482,9 @@ def build_interview_graph(
             }
 
     def configure_node(state: InterviewState) -> dict:
-        role_key = state.get("role_key", "general_hr")
+        role_key = state.get("role_key", "llm_app")
         if role_key not in config.ROLES:
-            role_key = "general_hr"
+            role_key = "llm_app"
         role_info = config.ROLES[role_key]
         difficulty = state.get("difficulty", 2)
         if difficulty not in config.DIFFICULTY_LABELS:
@@ -435,6 +508,7 @@ def build_interview_graph(
             with open(md_path, "w", encoding="utf-8") as handle:
                 handle.write(
                     "# AI 模拟面试记录\n\n"
+                    f"- **用户**: {state.get('username', 'anonymous')}\n"
                     f"- **岗位**: {role_info['title']}\n"
                     f"- **难度**: {config.DIFFICULTY_LABELS[difficulty]}\n"
                     f"- **题量**: {total_count}\n"
@@ -502,9 +576,96 @@ def build_interview_graph(
         return {"first_topic_hint": first_hint, "phase": "preparing_question"}
 
     def prepare_question_node(state: InterviewState) -> dict:
+        # ---- 项目深挖模式 (v0.9): 按简历生成追问链, 不查题库; 失败则回退检索 ----
+        if state.get("interview_mode") == "project" and (state.get("resume_context") or "").strip():
+            asked_ids = state.get("asked_ids", [])
+            idx = state.get("main_question_count", 0) + 1
+            try:
+                prev_questions = "\n".join(
+                    f"- 第{r.get('round', '?')}题: {r.get('question', '')[:80]}"
+                    for r in state.get("records", [])
+                ) or "（这是第一题）"
+                raw = project_question_chain.invoke({
+                    "resume_context": state["resume_context"][:3500],
+                    "role_title": state.get("role_info", {}).get("title", "大模型应用开发工程师"),
+                    "question_index": idx,
+                    "prev_questions": prev_questions,
+                    "format_instructions": get_project_format_instructions(),
+                })
+                data = extract_json_object(raw)
+                if not data or not data.get("question"):
+                    raise ValueError(f"项目出题解析失败: {str(data)[:120]}")
+                qid = f"proj_{idx}"
+                question = {
+                    "id": qid,
+                    "category": "项目深挖",
+                    "type": "scenario",
+                    "difficulty": state.get("difficulty", 2),
+                    "question": data["question"],
+                }
+                answer_data = {
+                    "id": qid,
+                    "question": data["question"],
+                    "standard_answer": data.get("standard_answer", ""),
+                    "scoring_points": data.get("scoring_points", []) or [],
+                    "type": "scenario",
+                }
+                new_categories = list(state.get("asked_categories", []))
+                new_categories.append("项目深挖")
+                logger.info("项目深挖出题成功 (thread=%s, %s)", state.get("thread_id"), qid)
+                return {
+                    "question_id": qid,
+                    "current_question": question,
+                    "current_answer_data": answer_data,
+                    "question_index": idx,
+                    "asked_ids": asked_ids + [qid],
+                    "asked_categories": new_categories,
+                    "rendered_question": "",
+                    "main_answer": "",
+                    "followup_question": "",
+                    "followup_answer": "",
+                    "followup_context": {},
+                    "initial_result": {},
+                    "final_result": {},
+                    "initial_score": 0,
+                    "final_score": 0,
+                    "input_action": "",
+                    "force_end": False,
+                    "phase": "question_prepared",
+                }
+            except Exception as exc:
+                logger.warning("项目深挖出题失败, 回退题库检索: %s", exc)
+
         topic = _select_topic_for_search(state)
         preferred_category = _select_preferred_category(state, retriever)
         asked_ids = state.get("asked_ids", [])
+        # 演示固定首题: 该岗位第一题固定出指定题 (候选人已准备, 保证演讲流畅);
+        # 仅影响第一题, 后续题目仍走正常混合检索
+        if not asked_ids and state["role_key"] == DEMO_FIRST_QUESTION_ROLE:
+            fixed = retriever.get_question_by_id(DEMO_FIRST_QUESTION_ID)
+            if fixed:
+                answer_data = retriever.get_answer(fixed["id"])
+                return {
+                    "question_id": fixed["id"],
+                    "current_question": fixed,
+                    "current_answer_data": answer_data or {},
+                    "question_index": state.get("main_question_count", 0) + 1,
+                    "asked_ids": [fixed["id"]],
+                    "asked_categories": [fixed.get("category", "")]
+                                            if fixed.get("category") else [],
+                    "rendered_question": "",
+                    "main_answer": "",
+                    "followup_question": "",
+                    "followup_answer": "",
+                    "followup_context": {},
+                    "initial_result": {},
+                    "final_result": {},
+                    "initial_score": 0,
+                    "final_score": 0,
+                    "input_action": "",
+                    "force_end": False,
+                    "phase": "question_prepared",
+                }
         candidates = retriever.get_question(
             topic=topic,
             role=state["role_key"],
@@ -1111,6 +1272,7 @@ def build_interview_graph(
             radar = {
                 "report_id": report_id,
                 "thread_id": state.get("thread_id", ""),
+                "username": state.get("username", ""),
                 "role_key": state.get("role_key", ""),
                 "role_title": state["role_info"]["title"],
                 "difficulty_label": state["difficulty_label"],

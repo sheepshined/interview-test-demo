@@ -45,6 +45,7 @@ import { getRoles } from '../api'
 import TopNav from '../components/TopNav.vue'
 
 const router = useRouter()
+const CONFIG_KEY = 'interviewConfig'
 const roles = ref([])
 const selectedRole = ref('')
 const questionCount = ref(5)
@@ -56,11 +57,14 @@ const countOptions = [
   { value: 15, label: '15 题 (约30分钟)' },
 ]
 
+function loadSavedConfig() {
+  try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || 'null') } catch (_) { return null }
+}
+
 async function loadRoles() {
   loadingRoles.value = true
   roleError.value = ''
   roles.value = []
-  selectedRole.value = ''
   try {
     const result = await getRoles()
     if (!result.success) {
@@ -72,7 +76,14 @@ async function loadRoles() {
       return
     }
     roles.value = result.roles
-    selectedRole.value = result.roles[0].key
+    // 默认回显上次选择的岗位与题量, 不必每次重选
+    const saved = loadSavedConfig()
+    selectedRole.value = (saved && roles.value.some(r => r.key === saved.key))
+      ? saved.key
+      : result.roles[0].key
+    if (saved && countOptions.some(c => c.value === saved.questionCount)) {
+      questionCount.value = saved.questionCount
+    }
   } finally {
     loadingRoles.value = false
   }
@@ -84,13 +95,16 @@ function startInterview() {
     roleError.value = '请先选择一个岗位'
     return
   }
-  sessionStorage.setItem('selectedRole', JSON.stringify({
+  const config = {
     key: role.key,
     title: role.title,
     resumeContext: '',
     resumeSkills: [],
     questionCount: questionCount.value,
-  }))
+  }
+  // sessionStorage 供本次跳转使用; localStorage 记住配置, 刷新/重进免重选
+  sessionStorage.setItem('selectedRole', JSON.stringify(config))
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
   router.push('/interview')
 }
 

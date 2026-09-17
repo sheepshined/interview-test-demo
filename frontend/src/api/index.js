@@ -1,3 +1,5 @@
+import { getToken, clearAuth } from '../auth'
+
 const BASE = '/api'
 
 // 上传等长耗时操作的超时阈值 (毫秒)
@@ -7,6 +9,12 @@ const UPLOAD_TIMEOUT = 90000     // 上传 (含 LLM 解析) 90s
 async function request(url, options = {}) {
   const headers = { ...options.headers }
   const isFormData = options.body instanceof FormData
+
+  // 鉴权: 除 login/register 外自动携带 Bearer token
+  if (!options.skipAuth) {
+    const token = getToken()
+    if (token) headers['Authorization'] = `Bearer ${token}`
+  }
 
   // FormData: 不设置 Content-Type, 让浏览器自动添加 boundary
   // JSON: 设置 Content-Type 并序列化 body
@@ -54,6 +62,13 @@ async function request(url, options = {}) {
     } catch (_) {
       detail = await res.text().catch(() => '')
     }
+    // 401 (除登录本身): token 缺失/过期 → 清除本地登录态并送回登录页
+    if (res.status === 401 && !options.skipAuth) {
+      clearAuth()
+      const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+      window.location.href = `/login?redirect=${redirect}`
+      return { success: false, status: 401, message: '登录已过期，请重新登录' }
+    }
     return {
       success: false,
       status: res.status,
@@ -75,7 +90,10 @@ async function request(url, options = {}) {
 export const getRoles = () => request('/roles')
 
 export const login = (username, password) =>
-  request('/login', { method: 'POST', body: { username, password } })
+  request('/login', { method: 'POST', body: { username, password }, skipAuth: true })
+
+export const register = (username, password) =>
+  request('/register', { method: 'POST', body: { username, password }, skipAuth: true })
 
 export const uploadResume = (file) => {
   const fd = new FormData()
@@ -90,7 +108,79 @@ export const uploadResume = (file) => {
 export const parseTextResume = (content) =>
   request('/resume/parse-text', { method: 'POST', body: { content } })
 
+// 个人知识库 (v0.7 + v0.8)
+export const kbListNotes = (search = '', tag = '', category = '') =>
+  request(`/kb/notes?search=${encodeURIComponent(search)}&tag=${encodeURIComponent(tag)}&category=${encodeURIComponent(category)}`)
+
+export const kbGetNote = (id) => request(`/kb/notes/${id}`)
+
+export const kbCreateNote = (title, content = '', tags = [], category = '') =>
+  request('/kb/notes', { method: 'POST', body: { title, content, tags, category } })
+
+export const kbUpdateNote = (id, title, content, tags, category = '') =>
+  request(`/kb/notes/${id}`, { method: 'PUT', body: { title, content, tags, category } })
+
+export const kbDeleteNote = (id) =>
+  request(`/kb/notes/${id}`, { method: 'DELETE' })
+
+export const kbGraph = (semantic = true, category = '') =>
+  request(`/kb/graph?semantic=${semantic}&category=${encodeURIComponent(category)}`)
+
+export const kbCategories = () => request('/kb/categories')
+
+export const kbUploadFiles = (fileList) => {
+  const fd = new FormData()
+  for (const f of fileList) fd.append('files', f)
+  return request('/kb/notes/upload', {
+    method: 'POST', body: fd, timeout: 300000,  // 5min: 多文件提取+LLM
+  })
+}
+
+export const kbCreateUrlNote = (url, title, description, category = '') =>
+  request('/kb/notes/url', { method: 'POST', body: { url, title, description, category } })
+
+export const kbSearch = (q, topK = 5) =>
+  request(`/kb/search?q=${encodeURIComponent(q)}&top_k=${topK}`)
+
+export const kbQa = (question, topK = 5, sessionId = null) =>
+  request('/kb/qa', { method: 'POST', body: { question, top_k: topK, session_id: sessionId }, timeout: 120000 })
+
+// v0.9: 对话会话
+export const kbChatListSessions = () => request('/kb/chat/sessions')
+export const kbChatCreateSession = () => request('/kb/chat/sessions', { method: 'POST' })
+export const kbChatGetSession = (id) => request(`/kb/chat/sessions/${id}`)
+export const kbChatRenameSession = (id, title) =>
+  request(`/kb/chat/sessions/${id}`, { method: 'PATCH', body: { title } })
+export const kbChatDeleteSession = (id) =>
+  request(`/kb/chat/sessions/${id}`, { method: 'DELETE' })
+
+export const kbTidy = (noteId) =>
+  request(`/kb/tidy?note_id=${noteId}`, { method: 'POST', timeout: 180000 })
+
+export const kbAutoCategory = (noteId) =>
+  request(`/kb/auto-category?note_id=${noteId}`, { method: 'POST', timeout: 120000 })
+
+export const kbRebuild = () =>
+  request('/kb/rebuild', { method: 'POST', timeout: 300000 })
+
+export const kbImportFromReport = (items, reportId) =>
+  request('/kb/notes/from-report', { method: 'POST', body: { items, report_id: reportId } })
+
 // 报告管理 (阶段2)
 export const getReports = () => request('/reports')
 export const getReport = (reportId) => request(`/reports/${reportId}`)
 export const getReportRadar = (reportId) => request(`/reports/${reportId}/radar`)
+
+// 逐题面试记录 (v0.9 右侧边栏)
+export const listInterviewRecords = () => request('/interview-records')
+export const getInterviewRecord = (filename) => request(`/interview-records/${encodeURIComponent(filename)}`)
+export const deleteInterviewRecord = (filename) =>
+  request(`/interview-records/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+
+// 知识库原始文件: 走鉴权下载接口 (<a>/<img> 无法带自定义头, 用 ?token= 传递)
+export function kbFileUrl(path) {
+  if (!path) return '#'
+  const name = encodeURIComponent(String(path).split('/').pop() || '')
+  const token = encodeURIComponent(getToken() || '')
+  return `/api/kb/files/${name}?token=${token}`
+}

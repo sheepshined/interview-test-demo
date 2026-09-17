@@ -58,3 +58,12 @@ class ScoreResult(BaseModel):
             "feedback": self.feedback,
             "is_correct": self.is_correct,
         }
+
+
+class ProjectQuestion(BaseModel):
+    """项目深挖模式 (v0.9) 生成的针对简历的追问"""
+    question: str = Field(description="针对简历项目经历的深挖问题, 口语化但技术指向明确")
+    standard_answer: str = Field(description="参考回答要点, 3-6 条, 换行分隔")
+    scoring_points: List[str] = Field(
+        default_factory=list, description="3-5 条评分要点(方案合理性维度)"
+    )

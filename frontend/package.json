@@ -9,8 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "cytoscape": "^3.34.1",
     "echarts": "^6.1.0",
     "lucide-vue-next": "^0.577.0",
+    "vditor": "^3.11.3",
     "vue": "^3.4.0",
     "vue-echarts": "^8.1.0",
     "vue-router": "^4.3.0"
