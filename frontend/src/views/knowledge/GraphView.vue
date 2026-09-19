@@ -24,16 +24,24 @@
         </div>
       </div>
 
-      <!-- 过滤工具条 -->
-      <div v-if="categories.length" class="filter-bar">
-        <span class="filter-label">分类过滤:</span>
-        <button v-for="c in categories" :key="c.category"
-                class="kb-tag cat-chip" :class="{ active: activeCategories.has(c.category) }"
-                @click="toggleCategory(c.category)"><DSIcon name="folder" :size="12" />{{ c.category }} ({{ c.count }})</button>
+      <!-- 视图开关 (常驻) -->
+      <div class="graph-toggles">
         <label class="sem-toggle">
           <input type="checkbox" v-model="showSemantic" @change="load" />
           显示语义边
         </label>
+        <label class="sem-toggle">
+          <input type="checkbox" v-model="hideOrphans" @change="applyOrphanFilter" />
+          隐藏孤立节点
+        </label>
+        <!-- 分类过滤 -->
+        <template v-if="categories.length">
+          <span class="toggle-divider"></span>
+          <span class="filter-label">分类:</span>
+          <button v-for="c in categories" :key="c.category"
+                  class="kb-tag cat-chip" :class="{ active: activeCategories.has(c.category) }"
+                  @click="toggleCategory(c.category)"><DSIcon name="folder" :size="12" />{{ c.category }} ({{ c.count }})</button>
+        </template>
       </div>
 
       <div class="graph-wrap ds-card">
@@ -57,9 +65,16 @@
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import cytoscape from 'cytoscape'
+import fcose from 'cytoscape-fcose'
+import layoutUtilities from 'cytoscape-layout-utilities'
 import TopNav from '../../components/TopNav.vue'
 import DSIcon from '../../components/DSIcon.vue'
 import { kbGraph, kbCategories, kbCreateNote, kbRebuild } from '../../api'
+
+// fcose 力导布局 (Cytoscape 官方推荐, 质量优于内置 cose);
+// layout-utilities 是 fcose 的 packComponents (不相连分量自动打包) 必需依赖
+cytoscape.use(layoutUtilities)
+cytoscape.use(fcose)
 
 const router = useRouter()
 const cyContainer = ref(null)
@@ -71,10 +86,14 @@ const wikiEdgeCount = ref(0)
 const semEdgeCount = ref(0)
 const categories = ref([])
 const activeCategories = ref(new Set())
+// 本库手工双链较少, 语义边是主要连接组织, 默认开启; 可关掉只看显式双链
 const showSemantic = ref(true)
+// 隐藏度数为 0 的孤立节点 (与任何笔记都无连接的笔记)
+const hideOrphans = ref(false)
 const rebuilding = ref(false)
 
 let cy = null
+let lastGraph = null   // 最近一次图谱数据, 供本地过滤开关免请求重渲染
 const noteIdByTitle = new Map()
 
 // 类型 → 配色 (高饱和度 + 白色描边, 保证视觉区分度)
@@ -131,16 +150,11 @@ async function rebuild() {
   }
 }
 
-/** 节点标签: 最多两行、每行 8 字, 超出省略; 全名放 tooltip, 避免长问题文本互相遮挡 */
+/** 节点标签: 单行最多 9 字, 超出省略; 全名放 tooltip, 让"点"而不是"文字"成为视觉主体 */
 function shortLabel(title) {
   const t = (title || '').trim()
-  if (!t) return ''
-  const LINE = 8
-  const MAX = LINE * 2
-  if (t.length <= LINE) return t
-  const line1 = t.slice(0, LINE)
-  const line2 = t.slice(LINE, MAX) + (t.length > MAX ? '…' : '')
-  return line1 + '\n' + line2
+  const MAX = 9
+  return t.length > MAX ? t.slice(0, MAX) + '…' : t
 }
 
 /** 计算节点度并分配尺寸/颜色 */
@@ -154,13 +168,19 @@ function buildElements(graph) {
   })
   const maxDeg = Math.max(1, ...Object.values(degreeMap))
 
+  // 孤立节点过滤: 度为 0 的点不渲染, 其相关边本来也不存在
+  const visibleNodes = hideOrphans.value
+    ? graph.nodes.filter(n => (degreeMap[n.id] ?? 0) > 0)
+    : graph.nodes
+  const visibleIds = new Set(visibleNodes.map(n => n.id))
+
   return {
-    nodes: graph.nodes.map(n => {
+    nodes: visibleNodes.map(n => {
       const deg = degreeMap[n.id] ?? 0
       const isVirtual = !!n.virtual
       const color = isVirtual ? TYPE_COLORS.virtual : (TYPE_COLORS[n.note_type] || TYPE_COLORS.note)
-      // 节点尺寸: 18~36, 避免过大导致重叠
-      const size = 18 + 18 * Math.sqrt(deg / maxDeg)
+      // 节点尺寸: 10~22, Obsidian 风格小圆点, 枢纽点略大但不碾压整图
+      const size = 10 + 12 * Math.sqrt(deg / maxDeg)
       return {
         data: {
           id: n.id,
@@ -173,33 +193,49 @@ function buildElements(graph) {
           virtual: isVirtual ? 'yes' : 'no',
           category: n.category || '',
           noteType: n.note_type || 'note',
+          deg,
         },
       }
     }),
-    edges: graph.edges.map((e, i) => ({
-      data: {
-        id: `e${i}`,
-        source: e.source,
-        target: e.target,
-        kind: e.kind,
-        virtual: e.virtual ? 'yes' : 'no',
-        score: e.score,
-      },
-    })),
+    edges: graph.edges
+      .filter(e => visibleIds.has(e.source) && visibleIds.has(e.target))
+      .map((e, i) => ({
+        data: {
+          id: `e${i}`,
+          source: e.source,
+          target: e.target,
+          kind: e.kind,
+          virtual: e.virtual ? 'yes' : 'no',
+          score: e.score,
+        },
+      })),
   }
 }
 
+function applyOrphanFilter() {
+  // 纯本地开关: 用已有数据重渲染, 不重新请求后端
+  if (lastGraph) render(lastGraph)
+}
+
 function render(graph) {
-  nodeCount.value = graph.nodes.length
-  virtualCount.value = graph.nodes.filter(n => n.virtual).length
-  wikiEdgeCount.value = graph.edges.filter(e => e.kind === 'wiki').length
-  semEdgeCount.value = graph.edges.filter(e => e.kind === 'semantic').length
-  if (!graph.nodes.length) return
+  lastGraph = graph
+  if (!graph.nodes.length) {
+    nodeCount.value = 0
+    virtualCount.value = 0
+    wikiEdgeCount.value = 0
+    semEdgeCount.value = 0
+    return
+  }
 
   noteIdByTitle.clear()
   for (const n of graph.nodes) noteIdByTitle.set(n.id, n.note_id)
 
   const { nodes, edges } = buildElements(graph)
+  // 统计以实际渲染的元素为准 (孤立节点过滤后数量会变)
+  nodeCount.value = nodes.length
+  virtualCount.value = nodes.filter(n => n.data.virtual === 'yes').length
+  wikiEdgeCount.value = edges.filter(e => e.data.kind === 'wiki').length
+  semEdgeCount.value = edges.filter(e => e.data.kind === 'semantic').length
 
   nextTick(() => {
     if (cy) { cy.destroy(); cy = null }
@@ -207,7 +243,7 @@ function render(graph) {
       container: cyContainer.value,
       elements: [...nodes, ...edges],
       style: [
-        // ---- 节点基础 ----
+        // ---- 节点基础 (小圆点 + 弱化单行标签, 全名 hover 看) ----
         {
           selector: 'node',
           style: {
@@ -216,22 +252,16 @@ function render(graph) {
             'background-color': 'data(color)',
             'width': 'data(size)',
             'height': 'data(size)',
-            'border-width': 3,
+            'border-width': 2,
             'border-color': 'data(borderColor)',
-            'color': '#1e293b',
-            'font-size': 12,
-            'font-weight': 600,
+            'color': '#94a3b8',
+            'font-size': 10,
+            'font-weight': 500,
             'text-valign': 'bottom',
             'text-halign': 'center',
-            'text-margin-y': 8,
-            'text-wrap': 'wrap',
-            'text-max-width': 112,
-            'text-outline-color': '#ffffff',
-            'text-outline-width': 2,
-            'text-background-color': '#ffffff',
-            'text-background-opacity': 0.85,
-            'text-background-padding': 2,
-            'text-background-shape': 'roundrectangle',
+            'text-margin-y': 5,
+            'text-wrap': 'none',
+            'min-zoomed-font-size': 8,
           },
         },
         // ---- 虚节点 ----
@@ -239,20 +269,27 @@ function render(graph) {
           selector: 'node[virtual = "yes"]',
           style: {
             'background-color': TYPE_COLORS.virtual,
-            'border-color': '#6b7280',
+            'border-color': '#9ca3af',
             'border-style': 'dashed',
-            'color': '#6b7280',
-            'font-size': 11,
+            'color': '#b6bec9',
           },
         },
-        // ---- Wiki 边 (实线, 深灰) ----
+        // ---- 叶子/弱连接节点: 标签更淡, 把视觉让给枢纽 (hover 时由事件高亮) ----
+        {
+          selector: 'node[deg < 2]',
+          style: {
+            'color': '#c3cbd6',
+            'font-size': 9,
+          },
+        },
+        // ---- Wiki 边 (显式双链: 实线, 细而淡但仍比语义边强) ----
         {
           selector: 'edge[kind = "wiki"]',
           style: {
-            'width': 2,
+            'width': 1,
             'line-color': '#94a3b8',
             'curve-style': 'bezier',
-            'opacity': 0.7,
+            'opacity': 0.4,
           },
         },
         {
@@ -260,18 +297,18 @@ function render(graph) {
           style: {
             'line-style': 'dashed',
             'line-color': '#cbd5e1',
-            'opacity': 0.5,
+            'opacity': 0.3,
           },
         },
-        // ---- 语义边 (虚线, 淡紫) ----
+        // ---- 语义边 (自动推断弱关系: 极淡虚线, 布局上用长距弱力, 不再拉扯簇结构) ----
         {
           selector: 'edge[kind = "semantic"]',
           style: {
-            'width': 1.5,
+            'width': 1,
             'line-style': 'dashed',
-            'line-color': '#a78bfa',
+            'line-color': '#c4b5fd',
             'curve-style': 'bezier',
-            'opacity': 0.45,
+            'opacity': 0.22,
           },
         },
         // ---- 选中 ----
@@ -283,24 +320,7 @@ function render(graph) {
           },
         },
       ],
-      layout: {
-        name: 'cose',
-        animate: true,
-        animationDuration: 800,
-        animationEasing: 'ease-out-cubic',
-        // 关键参数: 强排斥 + 长边距 → 节点自然散开
-        nodeRepulsion: () => 12000,
-        idealEdgeLength: () => 160,
-        edgeElasticity: () => 80,
-        nestingFactor: 1.2,
-        gravity: 0.15,
-        numIter: 2000,
-        initialTemp: 300,
-        coolingFactor: 0.97,
-        minTemp: 1.0,
-        padding: 60,
-        nodeDimensionsIncludeLabels: true,
-      },
+      layout: buildLayoutOptions(true),
       minZoom: 0.3,
       maxZoom: 3,
       wheelSensitivity: 0.3,
@@ -314,15 +334,20 @@ function render(graph) {
       // 虚化无关节点/连线
       cy.elements().difference(hood).style({ opacity: 0.08 })
       hood.style({ opacity: 1 })
-      // 突出当前节点: 加粗描边 + 置顶 + 标签放大
+      // 突出当前节点: 加粗描边 + 置顶 + 标签放大变清晰
       node.style({
         'border-width': 4,
         'border-color': '#7c3aed',
         'z-index': 999,
         'font-size': 13,
+        'color': '#1e293b',
       })
-      // 突出关联节点
-      node.neighborhood().nodes().style({ 'border-width': 4, 'border-color': '#7c3aed' })
+      // 突出关联节点 (叶子标签也临时变深, 方便阅读)
+      node.neighborhood().nodes().style({
+        'border-width': 4,
+        'border-color': '#7c3aed',
+        'color': '#475569',
+      })
       // 突出连接线: 加粗 + 提色
       node.connectedEdges().forEach(e => {
         const isWiki = e.data('kind') === 'wiki'
@@ -363,24 +388,45 @@ function render(graph) {
   })
 }
 
+/**
+ * fcose 布局参数 (借鉴 Cytoscape 官方 fcose + Obsidian 紧凑团簇思路):
+ *  - quality "proof": 最高质量档, 带后处理去重叠
+ *  - nodeDimensionsIncludeLabels: 布局把标签矩形计入节点尺寸, 标签不压字
+ *  - 簇收紧: wiki 双链 45px 高弹性(真实关系, 强力聚团);
+ *    semantic 130px 低弹性(弱桥接, 只轻轻牵引, 不把不同主题拉散)
+ *  - packComponents + tile: 无关分量靠近摆放、孤立点网格平铺且紧挨主图
+ */
+function buildLayoutOptions(animate = true) {
+  return {
+    name: 'fcose',
+    quality: 'proof',
+    randomize: true,
+    animate,
+    animationDuration: 700,
+    animationEasing: 'ease-out-cubic',
+    fit: true,
+    padding: 40,
+    nodeDimensionsIncludeLabels: true,
+    packComponents: true,
+    // layout-utilities 分量打包: 不相连分量之间紧凑排列, 避免中间大片留白
+    componentSpacing: 20,
+    nodeSeparation: 60,
+    nodeRepulsion: () => 5500,
+    idealEdgeLength: (edge) => (edge.data('kind') === 'semantic' ? 100 : 45),
+    edgeElasticity: (edge) => (edge.data('kind') === 'semantic' ? 0.15 : 0.55),
+    nestingFactor: 0.1,
+    gravity: 0.4,
+    gravityRange: 3.8,
+    numIter: 4000,
+    tile: true,
+    tilingPaddingVertical: 14,
+    tilingPaddingHorizontal: 14,
+  }
+}
+
 function relayout() {
   if (!cy) return
-  cy.layout({
-    name: 'cose',
-    animate: true,
-    animationDuration: 800,
-    nodeRepulsion: () => 12000,
-    idealEdgeLength: () => 160,
-    edgeElasticity: () => 80,
-    nestingFactor: 1.2,
-    gravity: 0.15,
-    numIter: 2000,
-    initialTemp: 300,
-    coolingFactor: 0.97,
-    minTemp: 1.0,
-    padding: 60,
-    nodeDimensionsIncludeLabels: true,
-  }).run()
+  cy.layout(buildLayoutOptions(true)).run()
 }
 
 onMounted(() => { load(); loadCategories() })
@@ -430,12 +476,18 @@ onBeforeUnmount(() => { if (cy) cy.destroy() })
 
 .graph-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.filter-bar {
+.graph-toggles {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 14px;
+}
+
+.toggle-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border-default);
 }
 
 .filter-label { font-size: 12px; color: var(--text-faint); font-weight: 600; }

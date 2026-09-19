@@ -72,6 +72,14 @@
           ><DSIcon :name="kbImported ? 'check' : 'download'" :size="13" />{{ kbImported ? `已入库 ${kbImportedCount} 条` : (kbImporting ? '入库中…' : '存入知识库') }}</button>
         </div>
 
+        <!-- 入库结果反馈 (非阻塞提示条) -->
+        <div v-if="kbNotice" class="kb-notice" :class="kbNotice.type">
+          <DSIcon :name="kbNotice.type === 'ok' ? 'circle-check' : 'triangle-alert'" :size="14" />
+          <span>{{ kbNotice.text }}</span>
+          <button v-if="kbNotice.type === 'error'" class="kb-notice-close"
+                  @click="kbNotice = null; importToKnowledge()">重试入库</button>
+        </div>
+
         <!-- 覆盖检测: 已入库后展示每条薄弱点的知识库覆盖情况 -->
         <div v-if="kbCoverage" style="margin-bottom:16px;padding:12px;border-radius:8px;background:#fafafa;border:1px solid var(--border-default);">
           <div class="sum-sub-title"><DSIcon name="target" :size="13" />知识库覆盖情况</div>
@@ -167,6 +175,8 @@ const kbImporting = ref(false)
 const kbImported = ref(false)
 const kbImportedCount = ref(0)
 const kbCoverage = ref(null)
+// 入库结果反馈 (页面内非阻塞提示, 替代原生 alert 弹窗)
+const kbNotice = ref(null)
 
 async function importToKnowledge() {
   if (kbImporting.value || kbImported.value || !radar.value) return
@@ -184,11 +194,16 @@ async function importToKnowledge() {
       const skipped = result.skipped.length
         ? `（${result.skipped.length} 条同名笔记已存在，跳过）` : ''
       const sparseCount = (result.coverage || []).filter(c => c.sparse).length
-      const sparseTip = sparseCount ? `\n注意：${sparseCount} 个薄弱点在知识库中无相关内容，建议导入资料。` : ''
-      alert(`已存入知识库 ${result.created.length} 条${skipped}${sparseTip}\n详见下方「知识库覆盖情况」。`)
+      const sparseTip = sparseCount ? `注意：${sparseCount} 个薄弱点在知识库中无相关内容，建议导入资料。` : ''
+      kbNotice.value = {
+        type: 'ok',
+        text: `已存入知识库 ${result.created.length} 条${skipped}，详见下方「知识库覆盖情况」。${sparseTip}`,
+      }
     } else {
-      alert(result.message || '入库失败，请重试')
+      kbNotice.value = { type: 'error', text: result.message || '入库失败，请重试' }
     }
+  } catch (e) {
+    kbNotice.value = { type: 'error', text: '网络错误，请稍后重试' }
   } finally {
     kbImporting.value = false
   }
@@ -238,6 +253,20 @@ function copyReport() {
 </script>
 
 <style scoped>
+/* 入库结果非阻塞提示条 */
+.kb-notice {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 16px; padding: 10px 14px;
+  border-radius: 8px; font-size: 13px; line-height: 1.5;
+}
+.kb-notice.ok { background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d; }
+.kb-notice.error { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+.kb-notice-close {
+  margin-left: auto; flex-shrink: 0; cursor: pointer;
+  border: 1px solid currentColor; background: none; color: inherit;
+  border-radius: 6px; padding: 3px 10px; font-size: 12px;
+}
+
 .sum-section-title {
   display: flex;
   align-items: center;

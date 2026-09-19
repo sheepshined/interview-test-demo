@@ -1,18 +1,24 @@
+import katex from 'katex'
+
 /**
- * 轻量安全 Markdown 渲染 (零依赖)。
+ * 轻量安全 Markdown 渲染 (仅依赖 katex 做数学公式)。
  *
- * 支持: 代码围栏、行内代码、标题、分割线、有序/无序列表、引用、
- * 加粗、斜体、链接、GFM 表格、段落与换行。
- * 先做 HTML 转义, 再生成标签, 链接仅允许 http(s)/相对路径, 防 XSS。
+ * 支持: 代码围栏、行内代码、数学公式($$块级$$ / $行内$)、标题、分割线、
+ * 有序/无序列表、引用、加粗、斜体、链接、GFM 表格、段落与换行。
  *
- * 代码块/行内代码在解析期间用带唯一前缀的 ASCII 哨兵占位,
- * 避免内部符号被二次解析; 哨兵前缀足够特殊, 正常文本不会冲突。
+ * 安全: 先 HTML 转义再生成标签; 链接仅允许 http(s)/相对路径, 防 XSS。
+ *
+ * 占位符统一用带唯一前缀的 ASCII 哨兵 (MDXV*), 避免内部符号被二次解析。
+ * 注意: katex 的 CSS (katex/dist/katex.min.css) 需由使用方页面引入。
  */
 
-const BLOCK_TOKEN = 'MDXVBLOCK'   // 代码围栏占位前缀:  MDXVBLOCK0
-const CODE_TOKEN = 'MDXVVCODE'    // 行内代码占位前缀:  MDXVVCODE0
+const BLOCK_TOKEN = 'MDXVBLOCK'   // 代码围栏占位:  MDXVBLOCK0
+const CODE_TOKEN = 'MDXVVCODE'    // 行内代码占位:  MDXVVCODE0
+const MATH_B_TOKEN = 'MDXVMATHB'  // 块级公式占位:  MDXVMATHB0 ($$...$$)
+const MATH_I_TOKEN = 'MDXVMATHI'  // 行内公式占位:  MDXVMATHI0 ($...$)
 const BLOCK_LINE_RE = new RegExp(`^${BLOCK_TOKEN}(\\d+)$`)
 const BLOCK_ANY_RE = new RegExp(`${BLOCK_TOKEN}\\d+`)
+const MATH_B_LINE_RE = new RegExp(`^\\s*${MATH_B_TOKEN}(\\d+)\\s*$`)
 
 function escapeHtml(text) {
   return text
@@ -29,14 +35,38 @@ function safeUrl(url) {
   return ''
 }
 
+/** LaTeX → HTML (katex); 解析失败时退化为转义后的等宽文本, 不抛错不卡页面 */
+function renderMath(latex, display) {
+  const tex = (latex || '').trim()
+  if (!tex) return ''
+  try {
+    return katex.renderToString(tex, {
+      displayMode: display,
+      throwOnError: false,
+      output: 'html',
+    })
+  } catch (_) {
+    return `<code class="md-math-raw">${escapeHtml(tex)}</code>`
+  }
+}
+
 function renderInline(raw) {
-  let t = escapeHtml(raw)
+  let t = String(raw)
+  const maths = []
+  // 行内公式 $...$: 须在转义前提取 (katex 自行处理转义)。
+  // 防误伤货币等场景: 公式内容不含中文、不以空格开头/结尾。
+  t = t.replace(/\$([^$\n]+)\$/g, (m, tex) => {
+    if (/[\u4e00-\u9fff]/.test(tex) || tex !== tex.trim()) return m
+    maths.push(renderMath(tex, false))
+    return ` ${MATH_I_TOKEN}${maths.length - 1} `
+  })
   const codes = []
-  // 行内代码: 原样保留, 不解析内部符号 (哨兵占位)
+  // 行内代码: 原样保留, 不解析内部符号
   t = t.replace(/`([^`\n]+)`/g, (_, code) => {
     codes.push(`<code class="md-code-inline">${code}</code>`)
     return ` ${CODE_TOKEN}${codes.length - 1} `
   })
+  t = escapeHtml(t)
   // 链接 [text](url)
   t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, text, url) => {
     const href = safeUrl(url)
@@ -48,8 +78,9 @@ function renderInline(raw) {
   // 斜体 *x* / _x_
   t = t.replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s).,!?])/g, '$1<em>$2</em>')
   t = t.replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,!?])/g, '$1<em>$2</em>')
-  // 还原行内代码
+  // 还原行内代码与公式 (公式占位由 renderMarkdown 注入块级 token 时也在此还原)
   t = t.replace(new RegExp(` ${CODE_TOKEN}(\\d+) `, 'g'), (m, idx) => codes[Number(idx)] || m)
+  t = t.replace(new RegExp(` ${MATH_I_TOKEN}(\\d+) `, 'g'), (m, idx) => maths[Number(idx)] || m)
   return t
 }
 
@@ -75,16 +106,23 @@ export function renderMarkdown(text) {
   if (!text) return ''
   const src = String(text).replace(/\r\n?/g, '\n')
 
-  // 1. 提取代码围栏为哨兵占位 (整块 HTML, 不再参与行级解析)
+  // 1. 提取代码围栏 (整块 HTML, 不再参与行级解析)
   const blocks = []
-  const protectedSrc = src.replace(/```([^\n]*)\n([\s\S]*?)```/g, (m, lang, code) => {
+  const fenced = src.replace(/```([^\n]*)\n([\s\S]*?)```/g, (m, lang, code) => {
     blocks.push(
       `<pre class="md-pre"><code class="md-code-block">${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`
     )
     return ` ${BLOCK_TOKEN}${blocks.length - 1} `
   })
 
-  const lines = protectedSrc.split('\n')
+  // 2. 提取块级公式 $$...$$ → katex display (在行级解析前完成, 公式内的 Markdown 符号不参与解析)
+  const mathBlocks = []
+  const withMath = fenced.replace(/\$\$([\s\S]+?)\$\$/g, (m, tex) => {
+    mathBlocks.push(renderMath(tex, true))
+    return ` ${MATH_B_TOKEN}${mathBlocks.length - 1} `
+  })
+
+  const lines = withMath.split('\n')
   const html = []
   let i = 0
 
@@ -99,7 +137,16 @@ export function renderMarkdown(text) {
 
     if (!line.trim()) { i++; continue }
 
-    // 代码围栏占位: 还原为整块 HTML (允许两侧有空白)
+    // 块级公式占位: 独占一行时直接输出 (不包 <p>, 居中展示)
+    const mMatch = line.match(MATH_B_LINE_RE)
+    if (mMatch) {
+      const html_ = mathBlocks[Number(mMatch[1])]
+      if (html_) html.push(`<div class="md-math-block">${html_}</div>`)
+      i++
+      continue
+    }
+
+    // 代码围栏占位: 还原为整块 HTML
     const bidx = blockIndex(line.trim())
     if (bidx >= 0) {
       if (blocks[bidx]) html.push(blocks[bidx])
@@ -172,11 +219,12 @@ export function renderMarkdown(text) {
       continue
     }
 
-    // 普通段落 (连续非空、非块级行)
+    // 普通段落 (连续非空、非块级行; 公式/代码占位行不属于段落)
     const para = []
     while (
       i < lines.length &&
       lines[i].trim() &&
+      !MATH_B_LINE_RE.test(lines[i]) &&
       !BLOCK_ANY_RE.test(lines[i]) &&
       !/^(#{1,6})\s+/.test(lines[i]) &&
       !/^\s*>/.test(lines[i]) &&

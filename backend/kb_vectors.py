@@ -18,8 +18,12 @@ import knowledge
 logger = logging.getLogger(__name__)
 
 KB_COLLECTION = "kb_notes"
-# 语义边阈值: 余弦相似度 ≥ 该值才连虚线边 (bge-base-zh 归一化向量经验值)
-SEM_LINK_THRESHOLD = 0.55
+# 语义边阈值: 余弦相似度 ≥ 该值才连虚线边
+# 0.68: 垂直同质语料(同主题笔记)相似度普遍偏高, 阈值要更高才能只保留
+# "同一子主题(RAG↔RAG)"而过滤掉"只是都属于大模型话题"的跨主题弱关联
+SEM_LINK_THRESHOLD = 0.66
+# 每篇笔记只保留相似度最高的 N 条语义边 (kNN 截断, 防止跨簇桥接过多把团拉散)
+SEM_LINK_TOP_K = 3
 # 检索相关度预警阈值: top1 < 该值视为知识库缺相关内容
 SPARSE_THRESHOLD = 0.35
 
@@ -181,9 +185,9 @@ def rebuild(username: str) -> dict:
             continue
         count += 1
 
-    # 两两余弦相似度 → sem_links
+    # 两两余弦相似度 → 每节点收集候选邻居
     titles = list(vectors.keys())
-    links = []
+    neighbors: Dict[str, list] = {t: [] for t in titles}
     for i in range(len(titles)):
         for j in range(i + 1, len(titles)):
             a, b = titles[i], titles[j]
@@ -191,9 +195,18 @@ def rebuild(username: str) -> dict:
             denom = (np.linalg.norm(va) * np.linalg.norm(vb)) or 1e-9
             score = float(np.dot(va, vb) / denom)
             if score >= SEM_LINK_THRESHOLD:
-                # 排序保证 title_a < title_b, 主键稳定
-                lo, hi = (a, b) if a < b else (b, a)
-                links.append((lo, hi, score))
+                neighbors[a].append((score, b))
+                neighbors[b].append((score, a))
+
+    # kNN 截断: 每个节点只保留相似度最高的 SEM_LINK_TOP_K 个邻居;
+    # 取并集(A 选了 B 或 B 选了 A 都连边), 避免高相似对被单边截断误删
+    link_pairs: Dict[tuple, float] = {}
+    for title, candidates in neighbors.items():
+        for score, other in sorted(candidates, key=lambda x: x[0], reverse=True)[:SEM_LINK_TOP_K]:
+            lo, hi = (title, other) if title < other else (other, title)
+            # 同一对可能从两个方向入选, 保留较高分
+            link_pairs[(lo, hi)] = max(link_pairs.get((lo, hi), 0.0), score)
+    links = [(lo, hi, score) for (lo, hi), score in link_pairs.items()]
 
     with knowledge._connect() as conn:
         conn.execute("DELETE FROM sem_links WHERE username = ?", (username,))

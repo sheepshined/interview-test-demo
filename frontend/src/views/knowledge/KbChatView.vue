@@ -111,6 +111,7 @@ import { useRouter } from 'vue-router'
 import TopNav from '../../components/TopNav.vue'
 import DSIcon from '../../components/DSIcon.vue'
 import { renderMarkdown } from '../../utils/markdown'
+import 'katex/dist/katex.min.css'   // 数学公式排版样式 (markdown.js 渲染 $/$$ 公式)
 import {
   kbQa, kbChatListSessions, kbChatCreateSession,
   kbChatGetSession, kbChatDeleteSession,
@@ -409,6 +410,16 @@ onMounted(async () => {
   border: 1px solid rgba(0,0,0,0.12); padding: 6px 10px; text-align: left;
 }
 .kc-msg-text :deep(.md-table th) { background: rgba(0,0,0,0.04); font-weight: 600; }
+/* 数学公式: 块级居中 + 横向可滚动; 解析失败退化为等宽文本 */
+.kc-msg-text :deep(.md-math-block) {
+  margin: 10px 0; padding: 4px 0; text-align: center; overflow-x: auto;
+}
+.kc-msg-text :deep(.katex-display) { margin: 0; }
+.kc-msg-text :deep(.md-math-raw) {
+  background: rgba(0,0,0,0.06); border-radius: 4px; padding: 2px 6px;
+  font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.kc-msg.user .kc-msg-text :deep(.md-math-raw) { background: rgba(255,255,255,0.18); color: #fff; }
 /* 用户气泡(深底)上的代码/表格反色 */
 .kc-msg.user .kc-msg-text :deep(.md-code-inline) { background: rgba(255,255,255,0.18); color: #fff; }
 .kc-msg.user .kc-msg-text :deep(.md-quote) { background: rgba(255,255,255,0.12); border-left-color: rgba(255,255,255,0.7); }

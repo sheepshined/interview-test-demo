@@ -955,6 +955,47 @@ def api_kb_rebuild(user: dict = Depends(get_current_user)):
     return {"success": True, **stats}
 
 
+@app.post("/api/kb/notes/{note_id}/auto-link")
+def api_kb_auto_link(note_id: int, user: dict = Depends(get_current_user)):
+    """智能关联: 为已有笔记补全 [[双链]] (孤立笔记融入知识图谱, 编辑页手动触发)。
+
+    检索最相关的 top3 笔记 (相关度 ≥ 语义边阈值), 追加缺失的双链到正文;
+    与 from-report 的入库自动关联同一套标准, 但作用于已存在的老笔记。
+    """
+    note = knowledge.get_note(user["username"], note_id)
+    if not note:
+        return JSONResponse(status_code=404, content={"success": False, "message": "笔记不存在"})
+    title = note["title"]
+    content = note.get("content") or ""
+    if not content.strip():
+        return JSONResponse(status_code=400, content={"success": False, "message": "笔记内容为空, 无法关联"})
+
+    query_text = f"{title}\n{content[:400]}"
+    related = [
+        m for m in kb_vectors.search(user["username"], query_text, top_k=10)
+        if m["note_id"] != note_id
+        and m["score"] >= kb_vectors.SEM_LINK_THRESHOLD
+        and m.get("title")
+    ][:3]
+    # 只追加尚不存在的链接, 已有的不重复
+    new_titles = [m["title"] for m in related if f"[[{m['title']}]]" not in content]
+    if not new_titles:
+        return {"success": True, "linked": [], "message": "暂无足够相关的新笔记可关联"}
+
+    if "## 相关笔记" in content:
+        new_content = content.rstrip() + "".join(f"\n- [[{t}]]" for t in new_titles)
+    else:
+        new_content = content.rstrip() + "\n\n## 相关笔记" + "".join(f"\n- [[{t}]]" for t in new_titles)
+    try:
+        knowledge.update_note(user["username"], note_id, title, new_content,
+                              note["tags"], note.get("category") or "")
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
+    fresh = knowledge.get_note(user["username"], note_id)
+    kb_vectors.upsert_note(user["username"], fresh)
+    return {"success": True, "linked": new_titles}
+
+
 class ReportImportRequest(BaseModel):
     """报告薄弱点一键入库: 每条 {topic, suggestion} → 一篇笔记。"""
     items: List[dict]
@@ -970,6 +1011,9 @@ def api_kb_import_from_report(req: ReportImportRequest,
     """
     created, skipped = [], []
     created_ids = set()   # 本轮新建笔记 id: 覆盖检测需排除 (避免"自我覆盖"误判)
+    # 自动关联: 相关度达到语义边阈值才追加 [[双链]], 每条最多 3 条
+    LINK_SCORE = getattr(kb_vectors, "SEM_LINK_THRESHOLD", 0.66)
+    LINK_TOP_K = 3
     for item in req.items[:50]:  # 防御性上限
         title = str(item.get("topic", "")).strip()[:knowledge.MAX_TITLE_LEN]
         suggestion = str(item.get("suggestion", "")).strip()
@@ -985,12 +1029,41 @@ def api_kb_import_from_report(req: ReportImportRequest,
                 user["username"], title, content,
                 tags=["面试薄弱点"], source="interview_report",
             )
-            note = knowledge.get_note(user["username"], result["id"])
-            kb_vectors.upsert_note(user["username"], note)
-            created.append(result)
-            created_ids.add(result["id"])
         except ValueError:
             skipped.append(title)  # 同名笔记已存在, 跳过不覆盖
+            continue
+
+        created.append(result)
+        created_ids.add(result["id"])
+
+        # 自动融入知识图谱: 检索相关已有笔记, 追加 [[双链]] 实线边。
+        # 用"标题+建议"作为查询比单标题信息更足; 排除本轮新建的薄弱点(它们互查只会抱团)。
+        try:
+            query_text = f"{title} {suggestion}".strip()
+            related = [
+                m for m in kb_vectors.search(user["username"], query_text, top_k=10)
+                if m["note_id"] not in created_ids
+                and m["score"] >= LINK_SCORE
+                and m.get("title")
+            ][:LINK_TOP_K]
+            if related:
+                link_block = "\n\n## 相关笔记\n" + "".join(
+                    f"\n- [[{m['title']}]]" for m in related
+                )
+                fresh = knowledge.get_note(user["username"], result["id"])
+                if fresh and "[[" not in (fresh.get("content") or ""):
+                    knowledge.update_note(
+                        user["username"], result["id"],
+                        fresh["title"], fresh["content"].rstrip() + link_block,
+                        fresh["tags"], fresh["category"],
+                    )
+        except Exception as exc:
+            logger.warning("薄弱点自动关联失败 (note=%s): %s", result["id"], exc)
+
+        # 向量在最终内容(含双链)确定后再刷新, 保证后续检索能感知新链接
+        note = knowledge.get_note(user["username"], result["id"])
+        if note:
+            kb_vectors.upsert_note(user["username"], note)
 
     # 覆盖检测: 每条薄弱点在知识库中检索相关内容 (向量库不可用时静默跳过)
     # 排除本轮刚创建的薄弱点笔记自身 —— 否则检索必然命中自己, 缺失提示永不触发

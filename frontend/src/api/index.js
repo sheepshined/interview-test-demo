@@ -160,6 +160,10 @@ export const kbTidy = (noteId) =>
 export const kbAutoCategory = (noteId) =>
   request(`/kb/auto-category?note_id=${noteId}`, { method: 'POST', timeout: 120000 })
 
+// 智能关联: 为已有笔记检索 top3 高相关笔记并追加 [[双链]] (孤立笔记融入图谱)
+export const kbAutoLink = (noteId) =>
+  request(`/kb/notes/${noteId}/auto-link`, { method: 'POST', timeout: 120000 })
+
 export const kbRebuild = () =>
   request('/kb/rebuild', { method: 'POST', timeout: 300000 })
 

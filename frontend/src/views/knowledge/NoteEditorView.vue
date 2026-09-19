@@ -21,6 +21,11 @@
           </div>
           <div class="editor-actions">
             <button v-if="!isNew" class="ds-btn ds-btn-ghost editor-action-btn"
+                    :disabled="aiBusy" @click="smartLink"
+                    title="检索知识库, 自动为当前笔记补全相关 [[双链]]">
+              <DSIcon name="link" :size="14" />智能关联
+            </button>
+            <button v-if="!isNew" class="ds-btn ds-btn-ghost editor-action-btn"
                     :disabled="aiBusy" @click="aiTidy">
               <DSIcon name="sparkles" :size="14" />{{ aiBusy ? 'AI 处理中…' : 'AI 整理' }}
             </button>
@@ -134,7 +139,7 @@ import TopNav from '../../components/TopNav.vue'
 import DSIcon from '../../components/DSIcon.vue'
 import {
   kbGetNote, kbCreateNote, kbUpdateNote, kbDeleteNote, kbListNotes,
-  kbCategories, kbSearch, kbTidy, kbAutoCategory, kbFileUrl,
+  kbCategories, kbSearch, kbTidy, kbAutoCategory, kbFileUrl, kbAutoLink,
 } from '../../api'
 
 const route = useRoute()
@@ -371,6 +376,33 @@ async function jumpToWiki(t) {
 }
 
 // ---- AI 能力 ----
+// 智能关联: 检索知识库 top3 高相关笔记, 为当前笔记追加缺失的 [[双链]] (孤立笔记融入图谱)
+async function smartLink() {
+  if (aiBusy.value) return
+  aiBusy.value = true
+  try {
+    const result = await kbAutoLink(noteId.value)
+    if (result.success) {
+      if (result.linked?.length) {
+        await load(true)                     // 刷新笔记数据 (静默, 不卸载编辑器)
+        vditor?.setValue(note.value.content)  // 编辑器同步含双链的新正文
+        await loadRefData()
+        insertTip.value = `已智能关联 ${result.linked.length} 篇: ${result.linked.join('、')}`
+        setTimeout(() => {
+          if ((insertTip.value || '').startsWith('已智能关联')) insertTip.value = ''
+        }, 6000)
+      } else {
+        insertTip.value = result.message || '暂无足够相关的笔记可关联'
+        setTimeout(() => { insertTip.value = '' }, 4000)
+      }
+    } else {
+      alert(result.message || '智能关联失败')
+    }
+  } finally {
+    aiBusy.value = false
+  }
+}
+
 async function aiTidy() {
   if (aiBusy.value || !vditor) return
   if (!confirm('AI 将重新整理当前笔记内容（覆盖编辑器），确定继续？')) return
