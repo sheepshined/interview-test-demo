@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/components.css">
+<link rel="stylesheet" href="assets/css/interactions.css">
 <style>
   /* ── 报告封面 ── */
   .cover {
@@ -232,8 +233,8 @@
               <g stroke="rgba(23,21,15,.14)"><path d="M170 40v220M40 150h260"/></g>
               <!-- 数据多边形 -->
               <path d="M170 45 L289 150 L170 248 L44 150 Z" fill="none" stroke="rgba(23,21,15,.28)"/>
-              <path d="M170 46.4 L283.7 150 L170 243.2 L44.6 150 Z" fill="rgba(217,58,31,.13)" stroke="#D93A1F" stroke-width="1.6"/>
-              <g fill="#D93A1F">
+              <path id="radarPoly" d="M170 46.4 L283.7 150 L170 243.2 L44.6 150 Z" fill="rgba(217,58,31,.13)" stroke="#D93A1F" stroke-width="1.6"/>
+              <g id="radarDots" fill="#D93A1F">
                 <circle cx="170" cy="46.4" r="3.4"/><circle cx="283.7" cy="150" r="3.4"/>
                 <circle cx="170" cy="243.2" r="3.4"/><circle cx="44.6" cy="150" r="3.4"/>
               </g>
@@ -243,7 +244,7 @@
                 <text x="170" y="284" text-anchor="middle">深度 DEPTH</text>
                 <text x="10" y="154">条理</text>
               </g>
-              <g class="radar-val">
+              <g class="radar-val" id="radarVals">
                 <text x="170" y="60" text-anchor="middle">8.6</text>
                 <text x="308" y="164" text-anchor="end">6.8</text>
                 <text x="170" y="230" text-anchor="middle">6.2</text>
@@ -253,7 +254,7 @@
           </div>
 
           <div class="rv" data-d="0.12s">
-            <div class="dims" data-meter>
+            <div class="dims" data-meter id="dims">
               <div class="dim-line">
                 <div class="top"><span class="name">准确<small>Accuracy</small></span><span class="val">8.6</span></div>
                 <div class="progress"><div class="progress-fill" data-w="86" style="width:0"></div></div>
@@ -285,7 +286,7 @@
           <span class="sec">§ 02</span><h2>分类得分</h2>
           <span class="hint">按题目类别聚合</span>
         </div>
-        <div class="rv" data-meter>
+        <div class="rv" data-meter id="catRows">
           <div class="cat-row"><span class="c">RAG 检索增强</span><span class="track"><i class="top" data-w="88" style="width:0"></i></span><span class="v">8.8</span><span class="n">3 题</span></div>
           <div class="cat-row"><span class="c">提示词工程</span><span class="track"><i data-w="85" style="width:0"></i></span><span class="v">8.5</span><span class="n">1 题</span></div>
           <div class="cat-row"><span class="c">Agent 与工具调用</span><span class="track"><i data-w="79" style="width:0"></i></span><span class="v">7.9</span><span class="n">2 题</span></div>
@@ -302,7 +303,7 @@
         <div class="sw rv">
           <div class="sw-col good">
             <div class="sw-title"><span data-ic="thumbsUp"></span>优势项</div>
-            <ul>
+            <ul id="swGood">
               <li>表达结构好：回答自带「结论 → 分点 → 收束」，面试官不需要追问结构。</li>
               <li>工程细节可信：讲到父文档检索、RRF 参数等实现层细节，与项目描述互相印证。</li>
               <li>诚实处理不会的点：对不确定的实现没有编造，而是说明思路边界。</li>
@@ -310,7 +311,7 @@
           </div>
           <div class="sw-col bad">
             <div class="sw-title"><span data-ic="thumbsDown"></span>待加强</div>
-            <ul>
+            <ul id="swBad">
               <li>评估体系薄弱：只提了指标名，缺少评测集构造与人工标注流程。</li>
               <li>重排价值表述笼统：没有量化「重排前后命中率」的对比。</li>
               <li>部署话题偏浅：未涉及并发、缓存与成本控制等生产问题。</li>
@@ -341,7 +342,7 @@
           </ul>
         </div>
 
-        <div class="advice rv">
+        <div class="advice rv" id="adviceList">
           <div class="advice-item">
             <span class="no">01</span>
             <div>
@@ -376,52 +377,7 @@
           <span class="hint">按题对照</span>
         </div>
 
-        <div class="compare rv">
-          <div class="q"><b>Q2</b>请说说你的 RAG 项目里，从文档到召回的完整链路是怎样的？为什么要引入重排？</div>
-          <div class="compare-grid">
-            <div class="cmp good">
-              <h5><span data-ic="thumbsUp"></span>高分答案特征</h5>
-              <ul>
-                <li>按「分块 → 召回 → 融合 → 重排 → 生成」分段作答</li>
-                <li>说明父文档策略：子块索引、父块返回</li>
-                <li>给出重排前后的 Top3 命中率对比数据</li>
-                <li>提到交叉编码器与双塔模型的成本差异</li>
-              </ul>
-            </div>
-            <div class="cmp bad">
-              <h5><span data-ic="thumbsDown"></span>低分踩坑特征</h5>
-              <ul>
-                <li>只说「用了向量数据库和重排模型」</li>
-                <li>把重排与召回混为一谈</li>
-                <li>无法解释为什么需要第二次排序</li>
-                <li>举不出任何量化或场景化的例子</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <div class="compare rv">
-          <div class="q"><b>Q3</b>你们怎么判断 RAG 的回答有没有幻觉？如何设计评估方案？</div>
-          <div class="compare-grid">
-            <div class="cmp good">
-              <h5><span data-ic="thumbsUp"></span>高分答案特征</h5>
-              <ul>
-                <li>区分检索质量与生成质量两类指标</li>
-                <li>说明评测集来源：真实 query + 人工标注</li>
-                <li>提到用 LLM-as-Judge 时需要人工抽检校准</li>
-                <li>给出上线后的线上监控口径</li>
-              </ul>
-            </div>
-            <div class="cmp bad">
-              <h5><span data-ic="thumbsDown"></span>低分踩坑特征</h5>
-              <ul>
-                <li>只回答「看回答准不准」</li>
-                <li>把幻觉与检索失败混为一类问题</li>
-                <li>没有提到任何可执行的评测流程</li>
-              </ul>
-            </div>
-          </div>
-        </div>
+        <div id="compareList"></div>
       </section>
 
       <!-- ══ §6 报告全文 ══ -->
@@ -459,6 +415,11 @@
 </div>
 
 <script src="assets/js/app.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/voice.js"></script>
+<script src="assets/js/interactions.js"></script>
+<script src="assets/js/md.js"></script>
+<script src="assets/js/pages/summary.js?v=2"></script>
 <script>
   /* 一键入库：演示状态流转 */
   const importBtn = document.getElementById('importBtn');

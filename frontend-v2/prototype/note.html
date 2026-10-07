@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/components.css">
+<link rel="stylesheet" href="assets/css/interactions.css">
 <style>
   .editor-layout { display: grid; grid-template-columns: 1.6fr 1fr; gap: 26px; align-items: start; }
 
@@ -143,8 +144,8 @@
         <div class="crumb"><span>卷·05</span><span class="sep">/</span><b>笔记编辑</b></div>
       </div>
       <div class="topbar-actions">
-        <button class="icon-btn" title="删除笔记" onclick="toast('演示：删除后返回笔记列表','trash')"><span data-ic="trash"></span></button>
-        <button class="btn btn-sm" onclick="toast('已保存 · 已同步向量索引')"><span data-ic="save"></span>保存</button>
+        <button class="icon-btn" title="删除笔记" id="deleteBtn"><span data-ic="trash"></span></button>
+        <button class="btn btn-sm" id="saveBtn"><span data-ic="save"></span>保存</button>
       </div>
     </div>
 
@@ -154,20 +155,20 @@
         <div class="editor rv">
           <div class="editor-head">
             <div class="type-row">
-              <span class="badge line"><span data-ic="pen"></span>手写笔记</span>
-              <span class="mono">NOTE № 07 · 创建于 09-27</span>
+              <span class="badge line" id="noteBadge"><span data-ic="pen"></span>手写笔记</span>
+              <span class="mono" id="noteNo">NOTE № — · 创建于 —</span>
             </div>
-            <input class="title-input" value="RAG 评估指标与评测集" />
+            <input class="title-input" value="" placeholder="无题笔记…" />
             <div class="editor-meta">
-              <span class="mini-field"><span data-ic="folder"></span>分类 <input value="大模型" /></span>
-              <span class="mini-field"><span data-ic="hash"></span>标签 <input value="评估, RAG, 评测集" /></span>
+              <span class="mini-field"><span data-ic="folder"></span>分类 <input id="catInput" value="" /></span>
+              <span class="mini-field"><span data-ic="hash"></span>标签 <input id="tagInput" value="" /></span>
             </div>
           </div>
 
           <div class="editor-toolbar">
-            <button class="tool-btn" onclick="toast('AI 整理排版完成：已统一标题层级与列表格式','sparkle')"><span data-ic="sparkle"></span>整理排版</button>
-            <button class="tool-btn" onclick="toast('已自动归类到「大模型」','folder')"><span data-ic="folder"></span>自动分类</button>
-            <button class="tool-btn" onclick="toast('已追加 3 条 [[双链]] 到相关笔记','link')"><span data-ic="link"></span>智能关联</button>
+            <button class="tool-btn" id="tidyBtn"><span data-ic="sparkle"></span>整理排版</button>
+            <button class="tool-btn" id="autocatBtn"><span data-ic="folder"></span>自动分类</button>
+            <button class="tool-btn" id="autolinkBtn"><span data-ic="link"></span>智能关联</button>
             <div class="seg">
               <button class="is-on" id="tabEdit">编辑</button>
               <button id="tabPreview">预览</button>
@@ -175,37 +176,9 @@
           </div>
 
           <div class="paper-area">
-            <textarea spellcheck="false">## 为什么需要评估
-RAG 的失败可能来自两端：检索没召回正确段落，或生成阶段脱离上下文。评估必须把两类问题分开，否则无法定位优化点。
+            <textarea spellcheck="false" placeholder="用 Markdown 书写；用 [[标题]] 链接其他笔记…"></textarea>
 
-## 三类核心指标
-- Faithfulness：回答的每个断言是否都能在上下文中找到支撑
-- Answer Relevancy：回答是否切题，而非答非所问
-- Context Recall：必要信息是否被检索回来
-
-## 评测集怎么构造
-1. 从真实使用中收集 50~100 条 query
-2. 为每条 query 标注标准答案与支撑段落
-3. 用 LLM-as-Judge 批量打分，再人工抽检 20% 校准
-
-> 经验：小规模高质量的评测集，比大规模自动生成更有指导意义。
-
-相关：[[向量检索]]、[[BM25 + 向量混合检索]]、[[Transformer 架构笔记]]</textarea>
-
-            <div class="preview" id="preview">
-              <h2>为什么需要评估</h2>
-              <p>RAG 的失败可能来自两端：检索没召回正确段落，或生成阶段脱离上下文。评估必须把两类问题分开，否则无法定位优化点。</p>
-              <h2>三类核心指标</h2>
-              <ul>
-                <li>Faithfulness：回答的每个断言是否都能在上下文中找到支撑</li>
-                <li>Answer Relevancy：回答是否切题，而非答非所问</li>
-                <li>Context Recall：必要信息是否被检索回来</li>
-              </ul>
-              <h2>评测集怎么构造</h2>
-              <p>1. 从真实使用中收集 50~100 条 query<br />2. 为每条 query 标注标准答案与支撑段落<br />3. 用 LLM-as-Judge 批量打分，再人工抽检 20% 校准</p>
-              <blockquote>经验：小规模高质量的评测集，比大规模自动生成更有指导意义。</blockquote>
-              <p>相关：<span class="wikilink" onclick="toast('跳转到「向量检索」笔记')">向量检索</span>、<span class="wikilink" onclick="toast('跳转到「BM25 + 向量混合检索」笔记')">BM25 + 向量混合检索</span>、<span class="wikilink" onclick="toast('跳转到「Transformer 架构笔记」笔记')">Transformer 架构笔记</span></p>
-            </div>
+            <div class="preview" id="preview"></div>
           </div>
         </div>
 
@@ -214,49 +187,23 @@ RAG 的失败可能来自两端：检索没召回正确段落，或生成阶段�
           <div class="panel rv" data-d="0.06s">
             <div class="panel-head">元信息 <span data-ic="target"></span></div>
             <div class="panel-body" style="padding-top:6px">
-              <div class="kv"><span class="k">类型</span><span class="v">手写笔记</span></div>
-              <div class="kv"><span class="k">创建</span><span class="v">2026-09-27</span></div>
-              <div class="kv"><span class="k">更新</span><span class="v">2026-10-04 14:22</span></div>
-              <div class="kv"><span class="k">字数</span><span class="v num">362</span></div>
-              <div class="kv"><span class="k">被引用</span><span class="v num">3</span></div>
-              <div class="kv"><span class="k">索引状态</span><span class="v"><span class="badge pine"><span class="dot pine"></span>已同步</span></span></div>
+              <div class="kv"><span class="k">类型</span><span class="v" id="metaType">手写笔记</span></div>
+              <div class="kv"><span class="k">创建</span><span class="v" id="metaCreated">—</span></div>
+              <div class="kv"><span class="k">更新</span><span class="v" id="metaUpdated">—</span></div>
+              <div class="kv"><span class="k">字数</span><span class="v num" id="metaWords">0</span></div>
+              <div class="kv"><span class="k">双链</span><span class="v num" id="metaRef">0</span></div>
+              <div class="kv"><span class="k">索引状态</span><span class="v" id="metaIndex"></span></div>
             </div>
           </div>
 
           <div class="panel rv" data-d="0.12s">
-            <div class="panel-head">反向链接 · 3 <span data-ic="link"></span></div>
-            <div class="panel-body" style="padding-top:6px">
-              <a class="backlink" href="note.html">
-                <span class="t"><span data-ic="pen"></span>部署清单：并发、缓存与成本</span>
-                <span class="ctx">…上线前先补齐 [[RAG 评估指标与评测集]]，否则无法判断优化是否有效…</span>
-              </a>
-              <a class="backlink" href="note.html">
-                <span class="t"><span data-ic="file"></span>Transformer 架构笔记</span>
-                <span class="ctx">…评测指标与 [[RAG 评估指标与评测集]] 中的口径保持一致…</span>
-              </a>
-              <a class="backlink" href="note.html">
-                <span class="t"><span data-ic="pen"></span>BM25 + 向量混合检索</span>
-                <span class="ctx">…上下文召回率（见 [[RAG 评估指标与评测集]]）是判断检索改动的第一指标…</span>
-              </a>
-            </div>
+            <div class="panel-head" id="backlinkCount">反向链接 · 0 <span data-ic="link"></span></div>
+            <div class="panel-body" style="padding-top:6px"><div id="backlinkList"></div></div>
           </div>
 
           <div class="panel rv" data-d="0.18s">
             <div class="panel-head">相关笔记 · 语义 <span data-ic="network"></span></div>
-            <div class="panel-body" style="padding-top:6px">
-              <div class="related">
-                <span class="t">BM25 + 向量混合检索</span><span class="sim">82%</span>
-                <button class="insert" onclick="toast('已插入 [[BM25 + 向量混合检索]]')">插入</button>
-              </div>
-              <div class="related">
-                <span class="t">向量检索</span><span class="sim">77%</span>
-                <button class="insert" onclick="toast('已插入 [[向量检索]]')">插入</button>
-              </div>
-              <div class="related">
-                <span class="t">反幻觉数据契约</span><span class="sim">71%</span>
-                <button class="insert" onclick="toast('已插入 [[反幻觉数据契约]]')">插入</button>
-              </div>
-            </div>
+            <div class="panel-body" style="padding-top:6px"><div id="relatedList"></div></div>
           </div>
         </aside>
       </div>
@@ -265,6 +212,11 @@ RAG 的失败可能来自两端：检索没召回正确段落，或生成阶段�
 </div>
 
 <script src="assets/js/app.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/voice.js"></script>
+<script src="assets/js/interactions.js"></script>
+<script src="assets/js/md.js"></script>
+<script src="assets/js/pages/note.js"></script>
 <script>
   /* 编辑 / 预览切换 */
   const tabEdit = document.getElementById('tabEdit');

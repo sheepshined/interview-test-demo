@@ -1,0 +1,276 @@
+/* ============================================================
+   墨卷档案 · 交互层 (Interactions)
+   参照 Awwwards SOTD 常见标志性模式，以本项目「纸墨朱砂」语言实现：
+   自定义光标 / 磁吸按钮 / 方向性墨水填充 / 墨水涟漪 /
+   整页转场（墨幕 + 盖章）/ 逐字标题 / 雷达描线 / 滚动速度斜切
+   全部仅在 pointer:fine 且未开启减动效时启用（JS 侧同样有守卫）。
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   自定义光标：朱砂点 + 墨环，悬停放大，按下收缩
+   ------------------------------------------------------------ */
+html.ix-cursor body,
+html.ix-cursor a,
+html.ix-cursor button,
+html.ix-cursor label,
+html.ix-cursor .pick,
+html.ix-cursor [data-cursor] {
+  cursor: none;
+}
+/* 文本输入保留系统文本光标 */
+html.ix-cursor input,
+html.ix-cursor textarea,
+html.ix-cursor select {
+  cursor: text;
+}
+
+.ix-cursor-dot,
+.ix-cursor-ring,
+.ix-cursor-label {
+  position: fixed;
+  top: 0; left: 0;
+  z-index: 10001;
+  pointer-events: none;
+  opacity: 0;
+}
+html.ix-cursor .ix-cursor-dot,
+html.ix-cursor .ix-cursor-ring { opacity: 1; }
+
+.ix-cursor-dot {
+  width: 6px; height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--vermilion);
+}
+.ix-cursor-ring {
+  width: 34px; height: 34px;
+  margin: -17px 0 0 -17px;
+  border: 1px solid rgba(23, 21, 15, 0.5);
+  border-radius: 50%;
+  transition: width 0.28s var(--ease), height 0.28s var(--ease),
+              margin 0.28s var(--ease), border-color 0.28s ease,
+              background 0.28s ease, border-radius 0.28s var(--ease);
+}
+html.ix-cursor .ix-cursor-ring.is-hover {
+  width: 52px; height: 52px;
+  margin: -26px 0 0 -26px;
+  border-color: var(--vermilion);
+  background: rgba(217, 58, 31, 0.06);
+}
+html.ix-cursor .ix-cursor-ring.is-press {
+  width: 26px; height: 26px;
+  margin: -13px 0 0 -13px;
+  background: rgba(217, 58, 31, 0.14);
+}
+/* 文本态：环变成竖条输入线 */
+html.ix-cursor .ix-cursor-ring.is-text {
+  width: 2px; height: 22px;
+  margin: -11px 0 0 -1px;
+  border-radius: 1px;
+  border-color: var(--vermilion);
+  background: var(--vermilion);
+}
+.ix-cursor-label {
+  padding: 7px 12px 8px;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border-radius: var(--r-1);
+  transform: translate(18px, 22px) scale(0.9);
+  transform-origin: top left;
+  opacity: 0;
+  transition: opacity 0.22s ease, transform 0.28s var(--ease);
+}
+.ix-cursor-label.is-on {
+  opacity: 1;
+  transform: translate(18px, 22px) scale(1);
+}
+
+/* ------------------------------------------------------------
+   磁吸元素：JS 写 transform；释放时用弹性过渡回位
+   ------------------------------------------------------------ */
+[data-mag] { will-change: transform; }
+[data-mag].is-mag-live { transition: none; }
+[data-mag].is-mag-release { transition: transform 0.55s var(--ease); }
+
+/* ------------------------------------------------------------
+   按钮：墨水从进入方向涂满（覆盖 components 的垂直擦除）
+   ------------------------------------------------------------ */
+.js .btn::before { transform: translate(var(--ix-dx, 0), var(--ix-dy, 101%)); }
+.js .btn:hover::before { transform: translate(0, 0); }
+
+/* 墨水涟漪（点击处扩散） */
+.ix-ripple {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background: rgba(251, 249, 243, 0.4);
+  transform: scale(0);
+  animation: ix-ripple 0.65s ease-out forwards;
+  z-index: 0;
+}
+.btn-ghost .ix-ripple,
+.tts-btn .ix-ripple { background: rgba(23, 21, 15, 0.12); }
+@keyframes ix-ripple {
+  to { transform: scale(1); opacity: 0; }
+}
+
+/* ------------------------------------------------------------
+   3D 倾斜卡片（档案卡 / 雷达页）
+   ------------------------------------------------------------ */
+[data-tilt] {
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(0);
+  transition: transform 0.5s var(--ease);
+  will-change: transform;
+}
+[data-tilt].is-tilt-live { transition: none; }
+[data-tilt] { position: relative; }
+[data-tilt]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(360px 260px at var(--gx, 50%) var(--gy, 50%), rgba(255, 255, 255, 0.5), transparent 58%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  mix-blend-mode: soft-light;
+}
+[data-tilt]:hover::after { opacity: 0.85; }
+
+/* ------------------------------------------------------------
+   整页转场：墨幕从下方升起 + 朱砂边 + 盖章，离场向上揭开
+   ------------------------------------------------------------ */
+.ix-wipe {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  pointer-events: none;
+  visibility: hidden;
+}
+.ix-wipe .ix-wipe-panel {
+  position: absolute;
+  inset: -2% 0;
+  background: var(--ink);
+  border-top: 2px solid var(--vermilion);
+  transform: translateY(103%);
+}
+.ix-wipe .ix-wipe-seal {
+  position: absolute;
+  left: 50%; top: 50%;
+  margin: -31px 0 0 -31px;
+  width: 62px; height: 62px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--vermilion);
+  color: #FFF6EE;
+  font-family: var(--f-display);
+  font-weight: 900;
+  font-size: 30px;
+  border-radius: var(--r-1);
+  box-shadow: var(--sh-stamp);
+  opacity: 0;
+  transform: rotate(-14deg) scale(1.5);
+}
+/* 离场阶段：墨幕向上揭开 */
+.ix-wipe.is-out { visibility: visible; }
+.ix-wipe.is-out .ix-wipe-panel { transform: translateY(-103%); transition: transform 0.6s cubic-bezier(0.76, 0, 0.24, 1) 0.08s; }
+.ix-wipe.is-out .ix-wipe-seal { opacity: 0; transform: rotate(-8deg) scale(0.9); transition: opacity 0.2s ease, transform 0.2s ease; }
+/* 覆盖阶段：入场 */
+.ix-wipe.is-in { visibility: visible; pointer-events: auto; }
+.ix-wipe.is-in .ix-wipe-panel { transform: translateY(0); transition: transform 0.46s cubic-bezier(0.76, 0, 0.24, 1); }
+.ix-wipe.is-in .ix-wipe-seal { opacity: 1; transform: rotate(-8deg) scale(1); transition: opacity 0.24s ease 0.24s, transform 0.4s var(--ease) 0.24s; }
+
+/* ------------------------------------------------------------
+   逐字标题：外层不再整体位移，由每个字承担
+   ------------------------------------------------------------ */
+.js .hero-title .rv-line > span.split { transform: none !important; transition: none !important; }
+.hero-title .split .ch {
+  display: inline-block;
+  transform: translateY(112%);
+  transition: transform 0.72s var(--ease) var(--cd, 0s);
+  will-change: transform;
+}
+.is-in .split .ch { transform: translateY(0); }
+
+/* ------------------------------------------------------------
+   雷达描线：多边形 0→100 描出，顶点逐个落点，填充淡入
+   ------------------------------------------------------------ */
+.js .ix-radar-poly {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  fill-opacity: 0;
+  transition: stroke-dashoffset 1.05s var(--ease) 0.18s, fill-opacity 0.5s ease 0.85s;
+}
+.js .ix-radar-go .ix-radar-poly { stroke-dashoffset: 0; fill-opacity: 1; }
+.js .ix-radar-dots circle {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0);
+  transition: transform 0.4s var(--ease);
+}
+.js .ix-radar-dots circle:nth-child(1) { transition-delay: 0.78s; }
+.js .ix-radar-dots circle:nth-child(2) { transition-delay: 0.9s; }
+.js .ix-radar-dots circle:nth-child(3) { transition-delay: 1.02s; }
+.js .ix-radar-dots circle:nth-child(4) { transition-delay: 1.14s; }
+.js .ix-radar-go .ix-radar-dots circle { transform: scale(1); }
+
+/* ------------------------------------------------------------
+   输入框：朱砂下划线从左生长（覆盖 components 的纯变色）
+   ------------------------------------------------------------ */
+.input {
+  background: linear-gradient(var(--vermilion), var(--vermilion)) left bottom / 0% 2px no-repeat;
+  transition: background-size 0.45s var(--ease), border-color 0.2s ease;
+}
+.input:focus { background-size: 100% 2px; }
+
+/* ------------------------------------------------------------
+   开关/页签按下的「盖章」弹跳
+   ------------------------------------------------------------ */
+.ix-pop { animation: ix-pop 0.34s var(--ease); }
+@keyframes ix-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
+/* ------------------------------------------------------------
+   回到顶部印章（长页）
+   ------------------------------------------------------------ */
+.ix-top {
+  position: fixed;
+  right: 26px; bottom: 26px;
+  z-index: 90;
+  width: 46px; height: 46px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--vermilion);
+  border-radius: var(--r-1);
+  color: var(--vermilion);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(6px);
+  font-family: var(--f-display);
+  font-weight: 900;
+  font-size: 18px;
+  transform: rotate(-6deg) translateY(14px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, transform 0.4s var(--ease), visibility 0.3s;
+  box-shadow: var(--sh-stamp);
+}
+.ix-top.is-on { opacity: 1; visibility: visible; transform: rotate(-6deg) translateY(0); }
+.ix-top:hover { transform: rotate(0deg) scale(1.06); }
+
+/* ------------------------------------------------------------
+   减动效：全部退化为静态
+   ------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  .ix-cursor-dot, .ix-cursor-ring, .ix-cursor-label { display: none; }
+  .ix-wipe { display: none; }
+  .hero-title .split .ch { transform: none; transition: none; }
+  .js .ix-radar-poly { stroke-dashoffset: 0; fill-opacity: 1; transition: none; }
+  .js .ix-radar-dots circle { transform: scale(1); transition: none; }
+  [data-tilt] { transform: none; }
+}

@@ -73,21 +73,27 @@ const NAV_GROUPS = [
   {
     title: 'Interview / 面试流程',
     links: [
-      { page: 'home',     href: 'index.html',     idx: '01', ic: 'house',   label: '首页' },
-      { page: 'resume',   href: 'resume.html',    idx: '02', ic: 'file',    label: '简历匹配' },
-      { page: 'choose',   href: 'choose-job.html',idx: '03', ic: 'pin',     label: '选择岗位' },
-      { page: 'records',  href: 'records.html',   idx: '04', ic: 'records', label: '面试记录' },
+      { page: 'home',     href: 'index.html', spa: null,        idx: '01', ic: 'house',   label: '首页' },
+      { page: 'resume',   href: 'resume.html',    spa: 'resume',    idx: '02', ic: 'file',    label: '简历匹配' },
+      { page: 'choose',   href: 'choose-job.html',spa: 'choose-job',idx: '03', ic: 'pin',     label: '选择岗位' },
+      { page: 'records',  href: 'records.html',   spa: 'records',   idx: '04', ic: 'records', label: '面试记录' },
     ],
   },
   {
     title: 'Library / 个人知识库',
     links: [
-      { page: 'workspace', href: 'workspace.html', idx: '05', ic: 'pen',   label: '我的笔记' },
-      { page: 'graph',     href: 'graph.html',     idx: '06', ic: 'graph', label: '知识图谱' },
-      { page: 'chat',      href: 'chat.html',      idx: '07', ic: 'chat',  label: 'AI 对话' },
+      { page: 'workspace', href: 'workspace.html', spa: 'workspace', idx: '05', ic: 'pen',   label: '我的笔记' },
+      { page: 'graph',     href: 'graph.html',     spa: 'graph',     idx: '06', ic: 'graph', label: '知识图谱' },
+      { page: 'chat',      href: 'chat.html',      spa: 'chat',      idx: '07', ic: 'chat',  label: 'AI 对话' },
     ],
   },
 ];
+
+function railHref(l) {
+  if (!l.spa) return l.href; // 营销页/全屏页：整页导航
+  if (document.body.dataset.spa) return '#/' + l.spa; // 外壳内：hash 路由
+  return 'app.html#/' + l.spa; // 独立页：跳入外壳
+}
 
 function buildRail(activePage) {
   const rail = document.querySelector('.rail');
@@ -96,7 +102,7 @@ function buildRail(activePage) {
     <div class="rail-group">
       <div class="rail-group-title">${g.title}</div>
       ${g.links.map((l) => `
-        <a class="rail-link ${l.page === activePage ? 'is-active' : ''}" href="${l.href}">
+        <a class="rail-link ${l.page === activePage ? 'is-active' : ''}" href="${railHref(l)}" data-rail-page="${l.page}">
           <span class="idx">${l.idx}</span>${iconEl(l.ic)}<span>${l.label}</span>
         </a>`).join('')}
     </div>`).join('');
@@ -113,12 +119,12 @@ function buildRail(activePage) {
     </div>
     <nav class="rail-groups">${groups}</nav>
     <div class="rail-foot">
-      <span class="rail-avatar">A</span>
+      <span class="rail-avatar">${(window.IA && window.IA.getUsername() || 'A').charAt(0).toUpperCase()}</span>
       <div class="rail-user">
-        <div class="u-name">admin</div>
+        <div class="u-name">${window.IA ? window.IA.getUsername() || '未登录' : '未登录'}</div>
         <div class="u-role">Candidate</div>
       </div>
-      <a class="rail-quit" href="login.html" title="退出登录">${iconEl('arrowLeft')}</a>
+      <a class="rail-quit" href="login.html" title="退出登录" data-logout>${iconEl('arrowLeft')}</a>
     </div>`;
 }
 
@@ -232,13 +238,20 @@ function initDemoToggles() {
   });
 }
 
-/* ---------- 页面转场（淡出） ---------- */
+/* ---------- 页面转场（淡出；interactions.js 存在时让位给墨幕转场） ---------- */
 function initPageTransition() {
+  if (window.__IX_WIPE) return;
   document.addEventListener('click', (e) => {
+    if (e.defaultPrevented) return;
     const a = e.target.closest('a[href$=".html"]');
     if (!a) return;
     const href = a.getAttribute('href');
     if (a.target === '_blank' || href.startsWith('http')) return;
+    // SPA 外壳内：路由页由 router 接管，不整页跳转
+    if (window.__SPA && window.__SPA_ROUTES) {
+      const file = href.split('/').pop().replace('.html', '');
+      if (window.__SPA_ROUTES.has(file)) return;
+    }
     e.preventDefault();
     document.body.classList.add('is-leaving');
     setTimeout(() => { window.location.href = href; }, 190);
@@ -268,6 +281,19 @@ function renderIcons(root = document) {
 /* ---------- 启动 ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   const page = document.body.dataset.page;
+  if (window.IA) {
+    // 应用壳页面：未登录重定向；已登录时可从侧栏登出
+    if (document.body.dataset.shell === 'app') {
+      if (!window.IA.requireAuth()) return;
+      document.addEventListener('click', (e) => {
+        if (e.target.closest('[data-logout]')) {
+          e.preventDefault();
+          window.IA.clearAuth();
+          window.location.href = 'login.html';
+        }
+      });
+    }
+  }
   if (document.body.dataset.shell === 'app') buildRail(page);
   renderIcons();
   initRailToggle();

@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/components.css">
+<link rel="stylesheet" href="assets/css/interactions.css">
 <style>
   .setup-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: clamp(28px, 4vw, 52px); align-items: start; }
 
@@ -187,6 +188,9 @@
 </div>
 
 <script src="assets/js/app.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/voice.js"></script>
+<script src="assets/js/interactions.js"></script>
 <script>
   /* 单选交互 + 摘要同步 */
   function bindPickGroup(sel, onPick) {
@@ -204,6 +208,70 @@
     sumCount.textContent = p.dataset.num;
     sumCount2.textContent = p.dataset.num;
     sumEst.textContent = p.dataset.est;
+  });
+</script>
+<script>
+  /* ── 真实岗位列表 + 面试配置 ── */
+  let ROLES = [];
+  let selectedKey = '';
+
+  function bindPickGroup(sel, onPick) {
+    const box = document.querySelector(sel);
+    box.querySelectorAll('.pick').forEach((p) => p.addEventListener('click', () => {
+      box.querySelectorAll('.pick').forEach((x) => x.classList.toggle('is-on', x === p));
+      onPick(p);
+    }));
+  }
+  bindPickGroup('#countPicks', (p) => {
+    sumCount.textContent = p.dataset.num;
+    sumCount2.textContent = p.dataset.num;
+    sumEst.textContent = p.dataset.est;
+  });
+
+  function pickRole(key, title) {
+    selectedKey = key;
+    sumRole.textContent = title;
+    sumRole2.textContent = title;
+  }
+
+  async function loadRoles() {
+    const box = document.getElementById('rolePicks');
+    box.innerHTML = '<div class="mono" style="padding:12px 2px">正在加载岗位…</div>';
+    const res = await window.IA.getRoles();
+    if (!res.success || !Array.isArray(res.roles) || !res.roles.length) {
+      box.innerHTML = '<div class="mono" style="padding:12px 2px;color:var(--vermilion)">'
+        + (res.message || '岗位加载失败') + '</div>';
+      return;
+    }
+    ROLES = res.roles;
+    const saved = window.IA.readConfig();
+    box.innerHTML = ROLES.map((r, i) =>
+      '<button class="pick role-pick" data-key="' + r.key + '" data-title="' + r.title + '">'
+      + '<div class="head"><span class="t">' + r.title + '</span><span class="n">№0' + (i + 1) + '</span></div>'
+      + '<div class="tags">' + (r.tags || []).slice(0, 3).map((t) => '<span class="tag">' + t + '</span>').join('') + '</div>'
+      + '</button>').join('');
+    box.querySelectorAll('.pick').forEach((p) => p.addEventListener('click', () => {
+      box.querySelectorAll('.pick').forEach((x) => x.classList.toggle('is-on', x === p));
+      pickRole(p.dataset.key, p.dataset.title);
+    }));
+    const def = (saved && ROLES.some((r) => r.key === saved.key)) ? saved.key : ROLES[0].key;
+    const defEl = box.querySelector('[data-key="' + def + '"]');
+    if (defEl) defEl.classList.add('is-on');
+    pickRole(def, (ROLES.find((r) => r.key === def) || ROLES[0]).title);
+  }
+  loadRoles();
+
+  /* 进入面试间：写入配置（含简历上下文，若有） */
+  document.querySelector('a[href="interview.html"].btn-lg').addEventListener('click', (e) => {
+    if (!selectedKey) { e.preventDefault(); toast('请先选择岗位', 'alert'); return; }
+    const resume = window.IA.readResumeData();
+    window.IA.writeConfig({
+      key: selectedKey,
+      title: sumRole.textContent,
+      resumeContext: (resume && resume.resume_context) || '',
+      resumeSkills: (resume && resume.skills) || [],
+      questionCount: Number(sumCount.textContent) || 5,
+    });
   });
 </script>
 </body>

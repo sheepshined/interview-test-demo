@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/components.css">
+<link rel="stylesheet" href="assets/css/interactions.css">
 <style>
   /* ============ 暗房：局部令牌覆写 ============ */
   .room {
@@ -289,93 +290,24 @@
   <header class="room-top">
     <div class="room-left">
       <a class="room-exit" href="index.html"><span data-ic="arrowLeft"></span>退出</a>
-      <div class="room-role">
-        大模型应用开发工程师
-        <small>Mock session · Intermediate</small>
-      </div>
+      <div class="room-role" id="roomRole">模拟面试<small>Mock session · Loading</small></div>
     </div>
 
     <div class="room-progress">
-      <span class="label">第 <b>3</b> / 8 题 · In progress</span>
-      <div class="ticks-line">
-        <i class="done"></i><i class="done"></i><i class="now"></i><i></i><i></i><i></i><i></i><i></i>
-      </div>
+      <span class="label" id="progressLabel">准备中 · In progress</span>
+      <div class="ticks-line" id="progressTicks"></div>
     </div>
 
     <div class="room-right">
-      <div class="demo-switch" data-state-group>
-        <span class="lb">预览</span>
-        <button data-state="live" class="is-on">作答中</button>
-        <button data-state="gen">生成报告</button>
-        <button data-state="done">已完成</button>
-      </div>
       <button class="tts-btn is-on" id="ttsBtn"><span data-ic="volume"></span>语音</button>
-      <span class="timer" id="timer">14:26</span>
+      <span class="timer" id="timer">00:00</span>
     </div>
   </header>
 
   <!-- ══ 作答中 ══ -->
   <div class="room-body" data-state-view="live">
     <main class="transcript" id="transcript">
-      <div class="transcript-inner">
-
-        <div class="msg msg-status"><span>— 面试开始 · 14:02 —</span></div>
-
-        <article class="msg msg-ai">
-          <div class="msg-head">
-            <span class="msg-who">面试官</span><span class="msg-time">14:02</span>
-          </div>
-          <div class="msg-text">你好，我是本场面试官。我们会围绕大模型应用开发聊 8 个问题，回答不必完美，把思路讲清楚就好。先用一分钟做个自我介绍吧。</div>
-        </article>
-
-        <article class="msg msg-user">
-          <div class="msg-head">
-            <span class="msg-who">我</span><span class="msg-time">14:03</span>
-          </div>
-          <div class="msg-text">我主要做 RAG 方向的落地，做过一个基于 LangGraph 的模拟面试系统：题库用 BM25 加向量双路召回、RRF 融合排序，会话侧用人在回路中断来等待用户作答，报告会按四个维度打分并给出学习建议。</div>
-        </article>
-
-        <article class="msg msg-comment">
-          <div class="msg-head"><span class="msg-who" style="color:var(--ink-3)">面试官 · 反馈</span></div>
-          <div class="msg-text">好，项目里已经有比较完整的链路。那我们顺着 RAG 往下聊，看看你对检索细节的掌握程度。</div>
-        </article>
-
-        <article class="msg msg-ai">
-          <div class="msg-head">
-            <span class="msg-who">面试官</span><span class="msg-time">14:05</span>
-            <span class="msg-qid">Q2 · 检索链路</span>
-          </div>
-          <div class="msg-text">请说说你的 RAG 项目里，从文档到召回的完整链路是怎样的？为什么要引入重排，它解决了什么问题？</div>
-        </article>
-
-        <article class="msg msg-hint">
-          <div class="msg-head"><span class="msg-who" style="color:var(--ink-3)">提示</span></div>
-          <div class="hint-card">
-            <span data-ic="bulb"></span>
-            <div class="txt"><b>HINT 1/2</b><br />可以从「分块 → 双路召回 → 融合 → 重排 → 生成」五段来组织，重点说清重排前后的排序差异。</div>
-          </div>
-        </article>
-
-        <article class="msg msg-user">
-          <div class="msg-head"><span class="msg-who">我</span><span class="msg-time">14:07</span></div>
-          <div class="msg-text">文档先按语义边界切块，长文走父文档策略：子块建索引、父块作为返回单元。召回时 BM25 负责关键词命中，向量负责语义相近，两路各取 Top20 后用 RRF 融合。重排是把候选交给交叉编码器精排，因为双塔向量召回的相似度是粗粒度的，重排后 Top3 的命中率明显更稳。</div>
-        </article>
-
-        <article class="msg msg-comment">
-          <div class="msg-head"><span class="msg-who" style="color:var(--ink-3)">面试官 · 反馈</span></div>
-          <div class="msg-text">父文档策略这一点提得不错。不过你把重排的价值说得比较笼统，稍后我们回到这个问题上再深挖。</div>
-        </article>
-
-        <article class="msg msg-ai" id="liveMsg">
-          <div class="msg-head">
-            <span class="msg-who">面试官</span><span class="msg-time">14:09</span>
-            <span class="msg-qid">Q3 · 评估与幻觉</span>
-          </div>
-          <div class="msg-text"><span id="typer"></span><span class="caret"></span></div>
-        </article>
-
-        <div class="msg msg-status" id="thinkingRow" hidden><span class="thinking"><i></i><i></i><i></i></span></div>
-      </div>
+      <div class="transcript-inner" id="transcriptInner"></div>
     </main>
 
     <!-- 右侧控制台 -->
@@ -383,54 +315,23 @@
       <div class="panel">
         <div class="panel-head">面试信息 <span data-ic="target"></span></div>
         <div class="panel-body">
-          <div class="kv"><span class="k">岗位</span><span class="v">大模型应用</span></div>
-          <div class="kv"><span class="k">题量</span><span class="v">8 题</span></div>
-          <div class="kv"><span class="k">已答</span><span class="v">2 题</span></div>
-          <div class="kv"><span class="k">用时</span><span class="v" id="timer2">14:26</span></div>
+          <div class="kv"><span class="k">岗位</span><span class="v" id="kvRole">—</span></div>
+          <div class="kv"><span class="k">题量</span><span class="v" id="kvCount">—</span></div>
+          <div class="kv"><span class="k">已答</span><span class="v" id="kvAnswered">0 题</span></div>
+          <div class="kv"><span class="k">用时</span><span class="v" id="timer2">00:00</span></div>
         </div>
       </div>
 
       <div class="panel">
         <div class="panel-head">题目状态 <span data-ic="layers"></span></div>
         <div class="panel-body">
-          <ul class="q-list">
-            <li class="done"><span class="qn">01</span><span>自我介绍</span><span class="state">已评分</span></li>
-            <li class="done"><span class="qn">02</span><span>检索链路</span><span class="state">已评分</span></li>
-            <li class="now"><span class="qn">03</span><span>评估与幻觉</span><span class="state">作答中</span></li>
-            <li><span class="qn">04</span><span>Agent 工具调用</span><span class="state">待出题</span></li>
-            <li><span class="qn">05</span><span>Memory 设计</span><span class="state">待出题</span></li>
-            <li><span class="qn">06</span><span>微调数据构造</span><span class="state">待出题</span></li>
-            <li><span class="qn">07</span><span>部署与性能</span><span class="state">待出题</span></li>
-            <li><span class="qn">08</span><span>项目复盘</span><span class="state">待出题</span></li>
-          </ul>
+          <ul class="q-list" id="qList"></ul>
         </div>
       </div>
 
       <div class="panel">
-        <div class="panel-head">面试记录 <button class="del" style="opacity:1" title="刷新"><span data-ic="refresh"></span></button></div>
-        <div class="panel-body" style="padding-top:6px">
-          <div class="rec-item">
-            <div style="min-width:0">
-              <div class="t">大模型应用开发工程师</div>
-              <div class="d">2026-10-04 · 8 题</div>
-            </div>
-            <button class="del" title="删除"><span data-ic="trash"></span></button>
-          </div>
-          <div class="rec-item">
-            <div style="min-width:0">
-              <div class="t">RAG 算法工程师</div>
-              <div class="d">2026-10-02 · 5 题</div>
-            </div>
-            <button class="del" title="删除"><span data-ic="trash"></span></button>
-          </div>
-          <div class="rec-item">
-            <div style="min-width:0">
-              <div class="t">AI Agent 工程师</div>
-              <div class="d">2026-09-28 · 10 题</div>
-            </div>
-            <button class="del" title="删除"><span data-ic="trash"></span></button>
-          </div>
-        </div>
+        <div class="panel-head">面试记录 <span data-ic="records"></span></div>
+        <div class="panel-body" style="padding-top:6px" id="recList"></div>
       </div>
 
       <button class="end-btn" id="endBtn">提前结束面试</button>
@@ -446,9 +347,9 @@
         <p>汇总逐题评分、四维雷达与学习建议，通常需要 10–20 秒</p>
         <div class="progress" style="margin-top:24px"><div class="progress-fill" style="width:64%"></div></div>
         <div class="gen-log">
-          <div>› 汇总 8 道题的评分记录 …… <b>完成</b></div>
-          <div>› 计算四维雷达与分类得分 …… <b>完成</b></div>
-          <div>› 生成好答案 / 差答案对比 …… <b>进行中</b></div>
+          <div>› 汇总逐题评分记录 …… <b>完成</b></div>
+          <div>› 计算四维雷达与分类得分 …… <b>进行中</b></div>
+          <div>› 生成学习建议 …… 等待</div>
           <div>› 写入报告档案 …… 等待</div>
         </div>
       </div>
@@ -461,13 +362,13 @@
       <div class="finish-card">
         <div class="stamp stamp-lg">已完成</div>
         <h2>面试已完成</h2>
-        <p style="color:var(--ink-3); font-size:14px">本场共 8 题，你的作答记录已全部留档</p>
+        <p style="color:var(--ink-3); font-size:14px">你的作答记录已全部留档</p>
         <div class="stats">
-          <div><div class="n">8</div><div class="l">回答题数</div></div>
-          <div><div class="n">13:41</div><div class="l">用时</div></div>
-          <div><div class="n">72%</div><div class="l">完成度</div></div>
+          <div><div class="n" id="doneAnswered">0</div><div class="l">回答题数</div></div>
+          <div><div class="n" id="doneTotal">0</div><div class="l">总题数</div></div>
+          <div><div class="n" id="doneTime">00:00</div><div class="l">用时</div></div>
         </div>
-        <a class="btn btn-lg" href="summary.html" style="--btn-bg:var(--vermilion); border-color:var(--vermilion)">生成面试报告<span class="ar" data-ic="arrowRight"></span></a>
+        <button class="btn btn-lg" id="reportBtn" style="--btn-bg:var(--vermilion); border-color:var(--vermilion)">生成面试报告<span class="ar" data-ic="arrowRight"></span></button>
         <p class="mono" style="margin-top:18px">或稍后在「面试记录」中随时生成</p>
       </div>
     </div>
@@ -479,82 +380,23 @@
       <div class="desk-box">
         <textarea id="answer" rows="1" placeholder="输入你的回答，Enter 发送 / Shift + Enter 换行…"></textarea>
         <div class="desk-tools">
-          <button class="dbtn" id="micBtn" title="语音输入"><span data-ic="mic"></span></button>
+          <button class="dbtn" id="micBtn" title="语音输入（本地识别）"><span data-ic="mic"></span></button>
           <button class="dbtn" id="hintBtn" title="获取提示（每题 2 次）"><span data-ic="bulb"></span>提示</button>
           <button class="send-btn" id="sendBtn">发送<span data-ic="send"></span></button>
         </div>
       </div>
       <div class="desk-meta">
         <span>Enter 发送 · Shift+Enter 换行</span>
-        <span id="hintMeta">提示 1 / 2 已使用</span>
+        <span id="hintMeta">提示 0 / 2 已使用</span>
       </div>
     </div>
   </footer>
 </div>
 
 <script src="assets/js/app.js"></script>
-<script>
-  /* ── 打字机：模拟流式出题 ── */
-  const FULL_Q = '第三个问题聊聊评估。你们怎么判断 RAG 的回答有没有幻觉？如果要你设计一套评估方案，你会用哪些指标，怎么构造评测集？';
-  const typer = document.getElementById('typer');
-  let ti = 0;
-  function typeStep() {
-    if (ti <= FULL_Q.length) {
-      typer.textContent = FULL_Q.slice(0, ti++);
-      document.getElementById('transcript').scrollTop = 1e5;
-      setTimeout(typeStep, 42 + Math.random() * 46);
-    }
-  }
-  setTimeout(() => { document.getElementById('thinkingRow').hidden = false; }, 200);
-  setTimeout(() => { document.getElementById('thinkingRow').hidden = true; typeStep(); }, 1400);
-
-  /* ── 计时器 ── */
-  let sec = 14 * 60 + 26;
-  setInterval(() => {
-    sec++;
-    const t = String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0');
-    document.getElementById('timer').textContent = t;
-    document.getElementById('timer2').textContent = t;
-  }, 1000);
-
-  /* ── 输入台 ── */
-  const ta = document.getElementById('answer');
-  ta.addEventListener('input', () => {
-    ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
-  });
-  ta.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-  });
-  document.getElementById('sendBtn').addEventListener('click', send);
-  function send() {
-    const v = ta.value.trim();
-    if (!v) { toast('先写下你的回答', 'alert'); return; }
-    const box = document.querySelector('.transcript-inner');
-    const el = document.createElement('article');
-    el.className = 'msg msg-user';
-    el.innerHTML = `<div class="msg-head"><span class="msg-who">我</span><span class="msg-time">刚刚</span></div>
-      <div class="msg-text">${v.replace(/[<>]/g, '')}</div>`;
-    box.appendChild(el);
-    ta.value = ''; ta.style.height = 'auto';
-    document.getElementById('transcript').scrollTop = 1e5;
-    toast('回答已提交，面试官正在评分…');
-  }
-
-  /* ── 语音 / 提示 / 结束 ── */
-  const mic = document.getElementById('micBtn');
-  mic.addEventListener('click', () => {
-    mic.classList.toggle('is-live');
-    toast(mic.classList.contains('is-live') ? '正在聆听，请说话…' : '已停止语音输入', 'mic');
-  });
-  document.getElementById('hintBtn').addEventListener('click', () => toast('本题提示已用完（2/2）', 'bulb'));
-  document.getElementById('endBtn').addEventListener('click', () => {
-    document.querySelector('[data-state="done"]').click();
-    toast('面试已结束，可以生成报告了');
-  });
-  document.getElementById('ttsBtn').addEventListener('click', function () {
-    this.classList.toggle('is-on');
-  });
-</script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/voice.js"></script>
+<script src="assets/js/interactions.js"></script>
+<script src="assets/js/pages/interview.js"></script>
 </body>
 </html>

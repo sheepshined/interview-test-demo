@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>训练场 · AI 模拟面试官</title>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="assets/css/tokens.css">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/components.css">
+<link rel="stylesheet" href="assets/css/interactions.css">
+<style>
+  /* ── SPA 外壳：侧栏常驻，换页 = 极简快速淡出 ── */
+  .main {
+    transition: opacity 0.16s ease;
+  }
+  .main.is-leaving { opacity: 0; pointer-events: none; }
+  .sw-line { display: block; overflow: hidden; }
+  .sw-line > span {
+    display: inline-block;
+    transform: translateY(112%);
+    animation: sw-rise 0.5s var(--ease) forwards;
+    animation-delay: var(--swd, 0.1s);
+  }
+  @keyframes sw-rise { to { transform: none; } }
+
+  @media (prefers-reduced-motion: reduce) {
+
+    .sw-line > span { animation: none; transform: none; }
+  }
+
+  @media (max-width: 820px) {
+    .main.is-leaving { transform: none; }
+    .main.is-entering { transform: none; }
+  }
+</style>
+</head>
+<body data-shell="app" data-page="choose" data-spa="1">
+
+<div class="shell">
+  <aside class="rail"></aside>
+  <div class="rail-scrim"></div>
+
+  <!-- 内容区：由 router.js 注入（topbar + page-body 随路由更换） -->
+  <div class="main" id="appMain"></div>
+</div>
+
+  <div class="sheet sheet-a"></div>
+</div>
+
+<script src="assets/js/app.js?v=2"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/md.js"></script>
+<script src="assets/js/voice.js"></script>
+<script src="assets/vendor/cytoscape.min.js"></script>
+<script src="assets/js/interactions.js"></script>
+<script src="assets/js/router.js?v=11"></script>
+</body>
+</html>

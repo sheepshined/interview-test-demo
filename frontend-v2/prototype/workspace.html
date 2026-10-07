@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/components.css">
+<link rel="stylesheet" href="assets/css/interactions.css">
 <style>
   /* ── 工具条 ── */
   .toolbar {
@@ -90,7 +91,7 @@
         <div class="crumb"><span>卷·05</span><span class="sep">/</span><b>我的笔记</b></div>
       </div>
       <div class="topbar-actions">
-        <button class="tlink" onclick="toast('已重建索引：12 篇笔记向量 · 18 条语义关联','refresh')"><span data-ic="refresh"></span>重建索引</button>
+        <button class="tlink" id="rebuildBtn"><span data-ic="refresh"></span>重建索引</button>
       </div>
     </div>
 
@@ -102,9 +103,9 @@
           <p class="page-sub">上传文件 / 收藏网址 / 手写笔记，用 [[双链语法]] 把知识连成网。</p>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap">
-          <button class="btn btn-ghost btn-sm" data-open="#uploadDemo"><span data-ic="upload"></span>导入文件</button>
+          <button class="btn btn-ghost btn-sm" id="importBtn"><span data-ic="upload"></span>导入文件</button><input type="file" id="kbFileInput" multiple hidden />
           <button class="btn btn-ghost btn-sm" data-open="#urlDialog"><span data-ic="link"></span>添加网址</button>
-          <a class="btn btn-sm" href="note.html"><span data-ic="plus"></span>新建笔记</a>
+          <a class="btn btn-sm" href="note.html?mode=new"><span data-ic="plus"></span>新建笔记</a>
         </div>
       </div>
 
@@ -112,120 +113,20 @@
       <div class="toolbar rv" data-d="0.06s">
         <label class="search-box">
           <span data-ic="search"></span>
-          <input placeholder="搜索标题或内容…" />
+          <input id="searchInput" placeholder="搜索标题或内容…" />
         </label>
-        <div class="chips">
-          <button class="tag is-on"><span data-ic="folder"></span>全部 (12)</button>
-          <button class="tag"><span data-ic="folder"></span>大模型 (6)</button>
-          <button class="tag"><span data-ic="folder"></span>工程实践 (3)</button>
-          <button class="tag"><span data-ic="folder"></span>求职 (3)</button>
-        </div>
-        <div class="chips">
-          <button class="tag">RAG</button><button class="tag">向量检索</button>
-          <button class="tag">LangGraph</button><button class="tag">提示词</button>
-          <button class="tag">评估</button>
-        </div>
+        <div class="chips" id="catChips"></div>
+        <div class="chips" id="tagChips"></div>
       </div>
 
-      <!-- 导入结果（演示：点导入文件后展开） -->
-      <div class="uploads" id="uploadDemo" hidden>
-        <div class="uploads-head">
-          <span class="t">Import Result · 3 个文件</span>
-          <button class="icon-btn" style="width:28px;height:28px" onclick="document.getElementById('uploadDemo').hidden = true"><span data-ic="x"></span></button>
-        </div>
-        <div class="uploads-row"><span class="st ok">成功</span><span class="tt">Transformer 架构笔记.pdf</span><span class="meta">12 页 · 文本层 · AI 整理</span></div>
-        <div class="uploads-row"><span class="st ok">成功</span><span class="tt">RAG 论文摘录.md</span><span class="meta">Markdown · 直读</span></div>
-        <div class="uploads-row"><span class="st skip">跳过</span><span class="tt">面试常见问题.docx</span><span class="meta">同名笔记已存在</span></div>
-      </div>
+      <!-- 导入结果 -->
+      <div class="uploads" id="uploadDemo" hidden></div>
 
       <!-- 笔记网格 -->
-      <div class="notes-grid" data-stagger>
-        <article class="note-card tall sheet sheet-hover rv">
-          <div class="head">
-            <span class="type-glyph note"><span data-ic="pen"></span></span>
-            <span class="title">RAG 评估指标与评测集</span>
-          </div>
-          <p class="excerpt">Faithfulness 衡量回答是否有上下文支撑；Answer Relevancy 衡量是否切题；Context Recall 衡量检索是否召回必要信息。评测集建议由真实 query + 人工标注的标准答案 + 支撑段落构成，规模 50 条起，用 LLM-as-Judge 时需要抽样人工校准。相关：[[向量检索]]、[[BM25 + 向量混合检索]]。</p>
-          <div class="meta">
-            <span class="tag small">大模型</span>
-            <span class="tag small" style="cursor:default">评估</span>
-            <span class="links"><span data-ic="link"></span>3</span>
-            <span class="date">10-04</span>
-          </div>
-        </article>
-
-        <article class="note-card sheet sheet-hover rv">
-          <div class="head">
-            <span class="type-glyph file"><span data-ic="file"></span></span>
-            <span class="title">Transformer 架构笔记</span>
-            <span class="badge verm" style="font-size:9.5px">面试</span>
-          </div>
-          <p class="excerpt">Self-Attention 通过 Q/K/V 计算序列内相关性，多头机制在不同子空间并行捕捉模式；位置编码补充顺序信息，残差与 LayerNorm 保证深层可训练。</p>
-          <div class="meta">
-            <span class="tag small">大模型</span>
-            <span class="links"><span data-ic="link"></span>4</span>
-            <span class="date">10-03</span>
-          </div>
-        </article>
-
-        <article class="note-card sheet sheet-hover rv">
-          <div class="head">
-            <span class="type-glyph url"><span data-ic="link"></span></span>
-            <span class="title">BGE 模型卡（FlagEmbedding）</span>
-            <a class="src" href="javascript:void(0)" title="打开网址" onclick="toast('演示：将在新标签打开原网址','external')"><span data-ic="external"></span></a>
-          </div>
-          <p class="excerpt">BGE 系列中文检索表现稳定，bge-large-zh 适合离线索引，bge-small 适合低延迟场景；reranker 与 embedding 建议配套使用。</p>
-          <div class="meta">
-            <span class="tag small">大模型</span>
-            <span class="tag small" style="cursor:default">向量检索</span>
-            <span class="links"><span data-ic="link"></span>2</span>
-            <span class="date">10-02</span>
-          </div>
-        </article>
-
-        <article class="note-card sheet sheet-hover rv">
-          <div class="head">
-            <span class="type-glyph note"><span data-ic="pen"></span></span>
-            <span class="title">BM25 + 向量混合检索</span>
-          </div>
-          <p class="excerpt">BM25 负责关键词精确命中，向量负责语义相近；RRF 用排名而非分数融合，避免两路分数量纲不一致。权重可调，实践中向量略高、BM25 兜底专有名词。</p>
-          <div class="meta">
-            <span class="tag small">大模型</span>
-            <span class="tag small" style="cursor:default">RAG</span>
-            <span class="links"><span data-ic="link"></span>5</span>
-            <span class="date">09-29</span>
-          </div>
-        </article>
-
-        <article class="note-card sheet sheet-hover rv">
-          <div class="head">
-            <span class="type-glyph note"><span data-ic="pen"></span></span>
-            <span class="title">LangGraph 人在回路设计</span>
-          </div>
-          <p class="excerpt">用 interrupt() 在答题节点挂起，恢复时从 checkpoint 继续，避免重复选同一道题；把「选题 / 流式输出 / 等待作答」拆成独立节点后，恢复语义更清晰。</p>
-          <div class="meta">
-            <span class="tag small">工程实践</span>
-            <span class="links"><span data-ic="link"></span>2</span>
-            <span class="date">09-27</span>
-          </div>
-        </article>
-
-        <article class="note-card sheet sheet-hover rv">
-          <div class="head">
-            <span class="type-glyph note"><span data-ic="pen"></span></span>
-            <span class="title">部署清单：并发、缓存与成本</span>
-          </div>
-          <p class="excerpt">模型服务要做并发限制与排队；检索结果按 query 归一化后缓存；embedding 走批处理降低调用次数；成本估算要按 token 分别统计输入输出。</p>
-          <div class="meta">
-            <span class="tag small">工程实践</span>
-            <span class="links"><span data-ic="link"></span>1</span>
-            <span class="date">09-25</span>
-          </div>
-        </article>
-      </div>
+      <div class="notes-grid" data-stagger id="notesGrid"></div>
 
       <div class="grid-foot">
-        <span>共 12 篇 · 18 条双链 · 24 条语义关联</span>
+        <span id="gridStat">共 0 篇</span>
         <span>父文档检索 · 子块索引 / 父块返回</span>
       </div>
     </div>
@@ -259,12 +160,17 @@
     </div>
     <div class="dialog-foot">
       <button class="btn btn-ghost btn-sm" data-close>取消</button>
-      <button class="btn btn-sm" data-close onclick="toast('网址已收藏，正在抽取正文')">保存</button>
+      <button class="btn btn-sm" id="urlSave">保存</button>
     </div>
   </div>
 </div>
 
 <script src="assets/js/app.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/voice.js"></script>
+<script src="assets/js/interactions.js"></script>
+<script src="assets/js/md.js"></script>
+<script src="assets/js/pages/workspace.js"></script>
 <script>
   /* 演示：导入文件 → 展开导入结果面板 */
   document.querySelector('[data-open="#uploadDemo"]').addEventListener('click', (e) => {

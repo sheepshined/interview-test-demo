@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/components.css">
+<link rel="stylesheet" href="assets/css/interactions.css">
 <style>
   .two-col { display: grid; grid-template-columns: 1.55fr 1fr; gap: clamp(28px, 4vw, 56px); align-items: start; }
 
@@ -117,6 +118,7 @@
         <!-- 左：上传主区 -->
         <div>
           <div class="dropzone rv" id="dropzone" data-d="0.05s">
+            <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
             <span class="dz-corner tl"></span><span class="dz-corner tr"></span>
             <span class="dz-corner bl"></span><span class="dz-corner br"></span>
 
@@ -170,9 +172,9 @@
               <span class="tag">Vue 3</span><span class="tag">Redis</span>
             </div>
             <div class="result-grid">
-              <div class="cell"><div class="k">推荐岗位</div><div class="v">大模型应用开发工程师</div></div>
-              <div class="cell"><div class="k">项目经历</div><div class="v num">3</div></div>
-              <div class="cell"><div class="k">匹配方向</div><div class="v num">4</div></div>
+              <div class="cell"><div class="k">推荐岗位</div><div class="v">待匹配</div></div>
+              <div class="cell"><div class="k">匹配分</div><div class="v num">—</div></div>
+              <div class="cell"><div class="k">识别技能</div><div class="v num">—</div></div>
             </div>
             <div style="display:flex; gap:14px; margin-top:26px; flex-wrap:wrap">
               <a class="btn" href="matching.html">开始匹配岗位<span class="ar" data-ic="arrowRight"></span></a>
@@ -204,56 +206,105 @@
 </div>
 
 <script src="assets/js/app.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/voice.js"></script>
+<script src="assets/js/interactions.js"></script>
 <script>
+  /* ── 真实解析：PDF 上传 / 文本粘贴 → /api → sessionStorage.resumeData ── */
   const dz = document.getElementById('dropzone');
   const bar = document.getElementById('parseBar');
   const log = document.getElementById('parseLog');
   const sheet = document.getElementById('resultSheet');
+  const fileInput = document.getElementById('fileInput');
+  const pasteBtn = document.getElementById('parseTextBtn');
+  let running = false;
 
-  /* 拖拽高亮 */
   ['dragover', 'dragenter'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('is-drag'); }));
   ['dragleave', 'drop'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('is-drag'); }));
 
-  /* 演示：点击/拖拽/解析文本 → 播放解析流程，最后展示结果 */
-  let running = false;
-  const STEPS = [
-    ['打开文件 <b>高捷-大模型应用开发.pdf</b>', 10],
-    ['抽取文本层 · 2 页 · 1.8s', 34],
-    ['结构化字段：姓名 / 技能 / 项目', 62],
-    ['技能命中题库标签 <b>8</b> 项', 84],
-    ['分析完成，生成岗位匹配建议', 100],
-  ];
-  function runParse() {
-    if (running) return;
+  function setStep(msg, pct) {
+    if (msg) log.innerHTML += '<div>› ' + msg + '</div>';
+    if (pct != null) bar.style.width = pct + '%';
+  }
+  function beginParse(filename) {
     running = true;
     sheet.hidden = true;
     dz.classList.add('is-parsing');
     log.innerHTML = '';
     bar.style.width = '8%';
-    let i = 0;
-    const next = () => {
-      if (i >= STEPS.length) {
-        dz.classList.remove('is-parsing');
-        sheet.hidden = false;
-        sheet.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        toast('简历解析完成，已提取 8 项技能');
-        running = false;
-        return;
-      }
-      const [msg, pct] = STEPS[i++];
-      log.innerHTML += `<div>› ${msg}</div>`;
-      bar.style.width = pct + '%';
-      setTimeout(next, 520);
-    };
-    setTimeout(next, 380);
+    setStep(filename ? '打开文件 <b>' + filename + '</b>' : '开始解析文本简历', 14);
   }
-  dz.addEventListener('click', runParse);
-  dz.addEventListener('drop', runParse);
-  document.getElementById('parseTextBtn').addEventListener('click', runParse);
+  function endParse() { dz.classList.remove('is-parsing'); running = false; }
+
+  function showResult(data) {
+    endParse();
+    const skills = data.skills || [];
+    // 从 resume_context 首行提取姓名（接口无独立 name 字段）
+    const ctx = data.resume_context || '';
+    const nameHit = ctx.match(/(?:姓名|名字)[:：]s*(S+)/) || ctx.match(/^s*([一-龥]{2,4})s*$/m);
+    const name = data.name || (nameHit && nameHit[1]) || '求职者';
+    document.querySelector('#resultSheet .result-name').textContent = name;
+    document.querySelector('#resultSheet .badge').innerHTML =
+      '<span class="dot pine"></span>已识别 ' + skills.length + ' 项技能';
+    document.querySelector('#resultSheet .skill-tags').innerHTML =
+      (skills.length ? skills : ['（未识别到明确技能关键词）']).map((t) => '<span class="tag">' + t + '</span>').join('');
+    const cells = document.querySelectorAll('#resultSheet .result-grid .cell .v');
+    if (cells[0]) cells[0].textContent = data.suggested_role_title || data.suggested_role || '待匹配';
+    if (cells[1]) cells[1].textContent = data.match_score != null ? Math.round(data.match_score * (data.match_score <= 1 ? 100 : 1)) + '%' : '—';
+    if (cells[2]) cells[2].textContent = skills.length + ' 项';
+    sheet.hidden = false;
+    sheet.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    toast('简历解析完成，已提取 ' + skills.length + ' 项技能');
+  }
+
+  function failParse(message) {
+    endParse();
+    setStep('<b style="color:var(--vermilion)">' + message + '</b>', 100);
+    toast(message, 'alert');
+  }
+
+  async function handleFile(file) {
+    if (!file) return;
+    if (!/.pdf$/i.test(file.name)) { toast('请选择 PDF 文件', 'alert'); return; }
+    if (file.size > 50 * 1024 * 1024) { toast('PDF 不能超过 50MB', 'alert'); return; }
+    if (running) return;
+    beginParse(file.name);
+    const fake = setInterval(() => {
+      const cur = parseFloat(bar.style.width) || 8;
+      if (cur < 86) bar.style.width = (cur + 4) + '%';
+    }, 700);
+    const res = await window.IA.uploadResume(file);
+    clearInterval(fake);
+    if (!res.success) { failParse(res.message || '解析失败'); return; }
+    sessionStorage.setItem('resumeData', JSON.stringify(res));
+    setStep('结构化字段：姓名 / 技能 / 项目', 92);
+    showResult(res);
+  }
+
+  async function handlePaste() {
+    const text = document.getElementById('paste').value.trim();
+    if (!text) { toast('先粘贴简历内容', 'alert'); return; }
+    if (running) return;
+    beginParse('');
+    const res = await window.IA.parseTextResume(text);
+    if (!res.success) { failParse(res.message || '解析失败'); return; }
+    sessionStorage.setItem('resumeData', JSON.stringify(res));
+    setStep('结构化字段：姓名 / 技能 / 项目', 92);
+    showResult(res);
+  }
+
+  dz.addEventListener('click', (e) => { if (!running && !e.target.closest('a')) fileInput.click(); });
+  fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+  dz.addEventListener('drop', (e) => handleFile(e.dataTransfer.files[0]));
+  pasteBtn.addEventListener('click', handlePaste);
   document.getElementById('reUpload').addEventListener('click', () => {
     sheet.hidden = true;
     dz.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
+
+  /* 已解析过：回显结果，可直接去匹配 */
+  const cached = window.IA.readResumeData();
+  if (cached) showResult(cached);
 </script>
 </body>
 </html>

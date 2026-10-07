@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/components.css">
+<link rel="stylesheet" href="assets/css/interactions.css">
 <style>
   .chat-layout { display: grid; grid-template-columns: 286px 1fr; gap: 24px; align-items: stretch; min-height: calc(100vh - 150px); }
 
@@ -148,122 +149,29 @@
         <!-- 会话列表 -->
         <aside class="sessions rv">
           <div class="sessions-head">
-            <span class="t">Conversations · 4</span>
-            <button class="btn btn-sm btn-block" onclick="newChat()"><span data-ic="plus"></span>新对话</button>
+            <span class="t" id="sessCount">Conversations</span>
+            <button class="btn btn-sm btn-block" id="newChatBtn"><span data-ic="plus"></span>新对话</button>
           </div>
-          <div class="sess-list">
-            <button class="sess is-on">
-              <span class="body">
-                <span class="t">注意力机制辨析</span>
-                <span class="d">刚刚 · 4 条消息</span>
-              </span>
-              <span class="del" title="删除"><span data-ic="trash"></span></span>
-            </button>
-            <button class="sess">
-              <span class="body">
-                <span class="t">RAG 评测集怎么建</span>
-                <span class="d">2 小时前 · 8 条消息</span>
-              </span>
-              <span class="del" title="删除"><span data-ic="trash"></span></span>
-            </button>
-            <button class="sess">
-              <span class="body">
-                <span class="t">LangGraph 中断恢复</span>
-                <span class="d">昨天 · 6 条消息</span>
-              </span>
-              <span class="del" title="删除"><span data-ic="trash"></span></span>
-            </button>
-            <button class="sess">
-              <span class="body">
-                <span class="t">部署成本怎么估</span>
-                <span class="d">09-25 · 3 条消息</span>
-              </span>
-              <span class="del" title="删除"><span data-ic="trash"></span></span>
-            </button>
-          </div>
+          <div class="sess-list" id="sessList"></div>
         </aside>
 
         <!-- 聊天区 -->
         <section class="chat rv" data-d="0.06s">
           <div class="chat-head">
             <div>
-              <div class="title">注意力机制辨析</div>
-              <div class="sub">检索 12 篇笔记 · 命中 3 条来源</div>
+              <div class="title" id="chatTitle">新对话</div>
+              <div class="sub">基于你的知识库回答 · 附来源与相似度</div>
             </div>
-            <button class="icon-btn" title="重命名" onclick="toast('演示：可重命名当前对话','edit')"><span data-ic="edit"></span></button>
+            <button class="icon-btn" title="重命名" id="renameBtn"><span data-ic="edit"></span></button>
           </div>
 
           <div class="chat-body" id="chatBody">
-
-            <div class="turn turn-user">
-              <div class="bubble">
-                <div class="who">我</div>
-                注意力机制和 self-attention 有什么区别？面试里被问到了，我想答得更严谨一点。
-              </div>
-            </div>
-
-            <div class="turn turn-ai">
-              <div class="who-row"><span class="who">知识库助手</span><span class="time">刚刚</span></div>
-              <div class="answer">
-                <p><strong>一句话结论：</strong>注意力机制是通用框架，self-attention 是其中「Q、K、V 同源」的特例<span class="cite">1</span>。</p>
-                <p>注意力机制的通用形式是：用查询（Query）与一组键值对（Key–Value）计算权重并加权求和。根据 Q 的来源不同，可以有多种变体：</p>
-                <ul>
-                  <li><strong>Self-Attention：</strong>Q、K、V 都来自同一个序列，建模序列内部依赖<span class="cite">2</span></li>
-                  <li><strong>Cross-Attention：</strong>Q 来自解码端，K、V 来自编码端，用于对齐两个序列</li>
-                  <li>你笔记里还提到多头机制：把表示拆到多个子空间并行做注意力<span class="cite">3</span></li>
-                </ul>
-                <p>面试表达建议：先给「框架 vs 特例」的界定，再补一句 Q/K/V 同源这个判据，最后举例说明两者各自的使用场景。</p>
-
-                <div class="sources">
-                  <div class="st"><span data-ic="book"></span>参考来源 · 3</div>
-                  <a class="source-row" href="note.html">
-                    <span class="no">1</span><span class="name">Transformer 架构笔记</span>
-                    <span class="bar"><i style="width:88%"></i></span><span class="pct">88%</span>
-                  </a>
-                  <a class="source-row" href="note.html">
-                    <span class="no">2</span><span class="name">注意力机制</span>
-                    <span class="bar"><i style="width:84%"></i></span><span class="pct">84%</span>
-                  </a>
-                  <a class="source-row" href="note.html">
-                    <span class="no">3</span><span class="name">位置编码</span>
-                    <span class="bar"><i style="width:61%"></i></span><span class="pct">61%</span>
-                  </a>
-                </div>
-              </div>
-            </div>
-
-            <div class="turn turn-user">
-              <div class="bubble">
-                <div class="who">我</div>
-                那多头注意力为什么要先把维度降下来再拼回去？
-              </div>
-            </div>
-
-            <div class="turn turn-ai" id="lastTurn">
-              <div class="who-row"><span class="who">知识库助手</span><span class="time">刚刚</span></div>
-              <div class="answer">
-                <p>因为总计算量与单头保持一致：把 <strong>d_model</strong> 平均分给 h 个头（每个头 d_model / h），每个头在低维子空间里独立计算注意力，最后拼接再投影回 d_model。</p>
-                <p>这样既让不同头关注不同模式，又不会让计算量随头数线性膨胀。</p>
-                <div class="sources">
-                  <div class="st"><span data-ic="book"></span>参考来源 · 1</div>
-                  <a class="source-row" href="note.html">
-                    <span class="no">1</span><span class="name">Transformer 架构笔记</span>
-                    <span class="bar"><i style="width:79%"></i></span><span class="pct">79%</span>
-                  </a>
-                </div>
-                <div class="sparse">
-                  <span data-ic="alert"></span>
-                  <span>相关度不算高，可能需要补充更多资料</span>
-                  <a href="workspace.html">去导入 →</a>
-                </div>
-              </div>
-            </div>
-
           </div>
 
           <div class="composer">
             <div class="box">
               <textarea id="q" rows="1" placeholder="输入你的问题，比如：注意力机制和 self-attention 有什么区别？"></textarea>
+              <button class="send" id="micBtn" title="语音提问（本地识别）" style="background:transparent; border:1px solid var(--line-strong); color:var(--ink-2)"><span data-ic="mic" style="color:currentColor"></span></button>
               <button class="send" id="sendBtn" title="发送"><span data-ic="arrowRight" style="color:#fff"></span></button>
             </div>
             <div class="foot">
@@ -278,6 +186,11 @@
 </div>
 
 <script src="assets/js/app.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/voice.js"></script>
+<script src="assets/js/interactions.js"></script>
+<script src="assets/js/md.js"></script>
+<script src="assets/js/pages/chat.js"></script>
 <script>
   const ta = document.getElementById('q');
   ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; });

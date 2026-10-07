@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/components.css">
+<link rel="stylesheet" href="assets/css/interactions.css">
 <style>
   /* 简历摘要条 */
   .resume-strip {
@@ -95,79 +96,83 @@
         </div>
       </div>
 
-      <div class="role-grid" data-stagger>
-        <!-- 推荐 -->
-        <article class="role-card sheet sheet-hover is-best rv" data-meter>
-          <span class="corner-tag verm">推荐 · MATCH</span>
-          <span class="no">№ 01</span>
-          <h3>大模型应用开发工程师</h3>
-          <div class="tags">
-            <span class="tag">RAG</span><span class="tag">Agent</span><span class="tag">Transformer</span>
-            <span class="tag">LangChain</span><span class="tag">MCP</span>
-          </div>
-          <div class="foot">
-            <div class="match">
-              <div class="row"><span class="pct">92</span><span class="k">% 匹配度</span></div>
-              <div class="bar"><i data-w="92" style="width:0"></i></div>
-            </div>
-            <a class="btn btn-sm" href="interview.html">开始面试<span class="ar" data-ic="arrowRight"></span></a>
-          </div>
-        </article>
-
-        <article class="role-card sheet sheet-hover rv" data-meter>
-          <span class="no">№ 02</span>
-          <h3>RAG 算法工程师</h3>
-          <div class="tags">
-            <span class="tag">向量检索</span><span class="tag">重排</span><span class="tag">分块策略</span>
-          </div>
-          <div class="foot">
-            <div class="match">
-              <div class="row"><span class="pct">78</span><span class="k">% 匹配度</span></div>
-              <div class="bar"><i data-w="78" style="width:0"></i></div>
-            </div>
-            <a class="btn btn-sm btn-ghost" href="interview.html">开始面试<span class="ar" data-ic="arrowRight"></span></a>
-          </div>
-        </article>
-
-        <article class="role-card sheet sheet-hover rv" data-meter>
-          <span class="no">№ 03</span>
-          <h3>AI Agent 工程师</h3>
-          <div class="tags">
-            <span class="tag">工具调用</span><span class="tag">Memory</span><span class="tag">LangGraph</span>
-          </div>
-          <div class="foot">
-            <div class="match">
-              <div class="row"><span class="pct">74</span><span class="k">% 匹配度</span></div>
-              <div class="bar"><i data-w="74" style="width:0"></i></div>
-            </div>
-            <a class="btn btn-sm btn-ghost" href="interview.html">开始面试<span class="ar" data-ic="arrowRight"></span></a>
-          </div>
-        </article>
-
-        <article class="role-card sheet sheet-hover rv" data-meter>
-          <span class="no">№ 04</span>
-          <h3>提示词工程师</h3>
-          <div class="tags">
-            <span class="tag">提示词工程</span><span class="tag">评测</span><span class="tag">结构化输出</span>
-          </div>
-          <div class="foot">
-            <div class="match">
-              <div class="row"><span class="pct">69</span><span class="k">% 匹配度</span></div>
-              <div class="bar"><i data-w="69" style="width:0"></i></div>
-            </div>
-            <a class="btn btn-sm btn-ghost" href="interview.html">开始面试<span class="ar" data-ic="arrowRight"></span></a>
-          </div>
-        </article>
-      </div>
+      <div class="role-grid" data-stagger id="roleGrid"></div>
 
       <div class="foot-note">
         <span>匹配度 = 技能与岗位标签的命中比例</span>
-        <span>演示数据 · 实际以接口返回为准</span>
+        <span>匹配度 = 技能命中岗位标签的比例 · 实时计算</span>
       </div>
     </div>
   </div>
 </div>
 
 <script src="assets/js/app.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/voice.js"></script>
+<script src="assets/js/interactions.js"></script>
+<script>
+  /* ── 真实岗位匹配：GET /api/roles + 简历技能 → 命中率排序 ── */
+  (async () => {
+    const grid = document.getElementById('roleGrid');
+    const strip = document.querySelector('.resume-strip');
+    const resume = window.IA.readResumeData();
+    const skills = (resume && resume.skills) || [];
+
+    if (strip) {
+      strip.querySelector('.stamp-mini').textContent = (resume && resume.name || '我').charAt(0);
+      strip.querySelector('.name').textContent = (resume && resume.name) || '求职者';
+      strip.querySelector('.meta').textContent =
+        resume ? '已完成简历分析 · ' + skills.length + ' 项技能' : '未检测到简历 · 仍可自主任选方向';
+      strip.querySelector('.skills').innerHTML =
+        (skills.slice(0, 4).map((t) => '<span class="tag">' + t + '</span>').join('')
+          + (skills.length > 4 ? '<span class="tag">+' + (skills.length - 4) + '</span>' : ''))
+        || '<span class="tag">通用方向</span>';
+    }
+
+    const res = await window.IA.getRoles();
+    if (!res.success || !Array.isArray(res.roles) || !res.roles.length) {
+      grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="empty-title">岗位加载失败</div><div class="empty-sub">'
+        + (res.message || '请确认后端已启动') + '</div></div>';
+      return;
+    }
+    let roles = [...res.roles];
+    const suggested = resume && resume.suggested_role;
+    if (suggested) {
+      const i = roles.findIndex((r) => r.key === suggested);
+      if (i > 0) roles.unshift(roles.splice(i, 1)[0]);
+    }
+
+    grid.innerHTML = roles.map((role, idx) => {
+      const tags = role.tags || [];
+      const hit = tags.filter((t) => skills.some((s) => s.includes(t) || t.includes(s))).length;
+      const pct = tags.length ? Math.round((hit / tags.length) * 100) : 50;
+      const best = idx === 0;
+      return '<article class="role-card sheet sheet-hover' + (best ? ' is-best' : '') + ' rv" data-meter>'
+        + (best ? '<span class="corner-tag verm">推荐 · MATCH</span>' : '')
+        + '<span class="no">№ 0' + (idx + 1) + '</span>'
+        + '<h3>' + role.title + '</h3>'
+        + '<div class="tags">' + tags.slice(0, 5).map((t) => '<span class="tag">' + t + '</span>').join('') + '</div>'
+        + '<div class="foot"><div class="match"><div class="row"><span class="pct">' + pct
+        + '</span><span class="k">% 匹配度</span></div><div class="bar"><i data-w="' + pct + '" style="width:0"></i></div></div>'
+        + '<a class="btn btn-sm' + (best ? '' : ' btn-ghost') + '" href="interview.html" data-role-key="' + role.key
+        + '" data-role-title="' + role.title + '">开始面试<span class="ar" data-ic="arrowRight"></span></a></div></article>';
+    }).join('');
+    if (window.renderIcons) renderIcons(grid);
+    if (window.initReveal) initReveal();
+
+    grid.addEventListener('click', (e) => {
+      const a = e.target.closest('a[data-role-key]');
+      if (!a) return;
+      window.IA.writeConfig({
+        key: a.dataset.roleKey,
+        title: a.dataset.roleTitle,
+        resumeContext: (resume && resume.resume_context) || '',
+        resumeSkills: skills,
+        questionCount: 5,
+      });
+      toast('已选定「' + a.dataset.roleTitle + '」');
+    });
+  })();
+</script>
 </body>
 </html>

@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/base.css">
 <link rel="stylesheet" href="assets/css/components.css">
+<link rel="stylesheet" href="assets/css/interactions.css">
 <style>
   .auth { display: grid; grid-template-columns: 1fr 1.06fr; min-height: 100vh; }
 
@@ -327,6 +328,9 @@
 </div>
 
 <script src="assets/js/app.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/voice.js"></script>
+<script src="assets/js/interactions.js"></script>
 <script>
   /* 页签切换 */
   const tabs = document.querySelectorAll('.tab');
@@ -339,15 +343,71 @@
   document.querySelectorAll('[data-goto]').forEach((a) =>
     a.addEventListener('click', () => switchPane(a.dataset.goto)));
 
-  /* 演示：提交 → 提示 + 跳转首页 */
-  document.querySelectorAll('[data-demo]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      toast(btn.dataset.demo);
-      setTimeout(() => {
-        document.body.classList.add('is-leaving');
-        setTimeout(() => { window.location.href = 'index.html'; }, 190);
-      }, 900);
-    });
+  /* 已登录直接进训练场 */
+  if (window.IA.isAuthenticated()) { location.href = 'index.html'; }
+
+  /* 行内提示条 */
+  function showMsg(text, ok) {
+    let bar = document.getElementById('auth-msg');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'auth-msg';
+      bar.className = 'form-msg';
+      bar.style.display = 'flex';
+      document.querySelector('.auth-card .tabs').after(bar);
+    }
+    bar.className = 'form-msg ' + (ok ? 'ok' : 'err');
+    bar.innerHTML = `<span data-ic="${ok ? 'checkCircle' : 'alert'}"></span><span>${text}</span>`;
+    if (window.renderIcons) renderIcons(bar);
+  }
+  function setBusy(btn, busy, busyLabel) {
+    if (busy) { btn.dataset.origText = btn.textContent; btn.textContent = busyLabel || '处理中…'; btn.disabled = true; }
+    else { btn.textContent = btn.dataset.origText || btn.textContent; btn.disabled = false; }
+  }
+  function goNext() {
+    const back = new URLSearchParams(location.search).get('redirect');
+    setTimeout(() => { window.location.href = back ? back : 'app.html'; }, 550);
+  }
+
+  /* 登录 */
+  document.getElementById('pane-login').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const u = document.getElementById('u1').value.trim();
+    const p = document.getElementById('p1').value;
+    if (!u || !p) { showMsg('请输入用户名与密码', false); return; }
+    const btn = e.target.querySelector('.btn');
+    setBusy(btn, true, '验证中…');
+    const res = await window.IA.login(u, p);
+    setBusy(btn, false);
+    if (res.success) {
+      window.IA.saveAuth(res.token, res.username);
+      showMsg(`欢迎回来，${res.username}`, true);
+      toast('登录成功，正在进入训练场…');
+      goNext();
+    } else {
+      showMsg(res.message || '登录失败', false);
+    }
+  });
+
+  /* 注册 */
+  document.getElementById('pane-register').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const u = document.getElementById('u2').value.trim();
+    const p = document.getElementById('p2').value;
+    const p3 = document.getElementById('p3').value;
+    if (p !== p3) { showMsg('两次输入的密码不一致', false); return; }
+    const btn = e.target.querySelector('.btn');
+    setBusy(btn, true, '创建中…');
+    const res = await window.IA.register(u, p);
+    setBusy(btn, false);
+    if (res.success) {
+      window.IA.saveAuth(res.token, res.username);
+      showMsg(`账号已创建，欢迎 ${res.username}`, true);
+      toast('注册成功，已自动登录');
+      goNext();
+    } else {
+      showMsg(res.message || '注册失败', false);
+    }
   });
 
   /* 注册两次密码一致性提示 */
