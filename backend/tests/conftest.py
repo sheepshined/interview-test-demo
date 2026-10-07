@@ -21,6 +21,8 @@ os.environ.setdefault("AUTH_DB_PATH", os.path.join(_TMP_DIR, "users.db"))
 os.environ.setdefault("KB_DB_PATH", os.path.join(_TMP_DIR, "knowledge.db"))
 # 知识库向量库隔离 (v0.8)
 os.environ.setdefault("KB_CHROMA_PATH", os.path.join(_TMP_DIR, "kb_chroma"))
+# 父文档检索库隔离 (v1.0)
+os.environ.setdefault("KB_PARENT_CHROMA_PATH", os.path.join(_TMP_DIR, "kb_parent_chroma"))
 # ≥32 字节, 满足 pyjwt 对 HS256 密钥长度的建议 (避免 InsecureKeyLengthWarning)
 os.environ.setdefault(
     "JWT_SECRET_KEY", "pytest-fixed-secret-key-0123456789abcdef0123456789abcdef"

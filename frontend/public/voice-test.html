@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>SenseVoice 语音输入全链路测试</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; }
+  button { font-size: 15px; padding: 8px 20px; cursor: pointer; }
+  pre { background: #f6f8fa; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
+  #status { color: #555; }
+</style>
+</head>
+<body>
+<h3>SenseVoice 本地语音识别 — 浏览器全链路测试页</h3>
+<p>链路: 麦克风(此处由 Chrome 假设备注入 WAV) → 采集重采样 16k → /api/asr → 后端离线识别</p>
+<p id="status">初始化…</p>
+<button id="btn">开始录音</button>
+<pre id="out">-</pre>
+
+<script type="module">
+import { saveAuth, getToken } from '/src/auth.js'
+import { useVoiceInput } from '/src/composables/useVoiceInput.js'
+
+const statusEl = document.getElementById('status')
+const outEl = document.getElementById('out')
+const btn = document.getElementById('btn')
+
+// 登录拿 token (演示账号 admin/123123), 之后的 /api/asr 请求经 request() 自动携带
+async function login() {
+  if (getToken()) return
+  const r = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'admin', password: '123123' }),
+  })
+  const j = await r.json()
+  if (!j.token) throw new Error('登录失败: ' + JSON.stringify(j))
+  saveAuth(j.token, j.username)
+}
+
+const voice = useVoiceInput({
+  onResult(text) {
+    outEl.textContent = JSON.stringify({ ok: true, text }, null, 2)
+    statusEl.textContent = '识别完成'
+  },
+})
+
+// 供自动化脚本轮询
+window.__voice = {
+  isRecording: () => voice.recording.value,
+  isProcessing: () => voice.processing.value,
+  isSupported: () => voice.supported,
+  error: () => voice.error.value,
+  elapsed: () => voice.elapsed.value,
+}
+
+btn.onclick = async () => {
+  if (voice.recording.value) {
+    voice.stop()
+    btn.textContent = '开始录音'
+    statusEl.textContent = '识别中…'
+    return
+  }
+  const ok = await voice.start()
+  btn.textContent = ok ? '停止录音' : '开始录音'
+  statusEl.textContent = ok ? '录音中…' : '启动失败: ' + voice.error.value
+}
+
+login()
+  .then(() => { statusEl.textContent = '就绪 (已登录 admin, supported=' + voice.supported + ')' })
+  .catch(e => { statusEl.textContent = '初始化失败: ' + e })
+</script>
+</body>
+</html>

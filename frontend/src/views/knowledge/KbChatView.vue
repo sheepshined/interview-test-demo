@@ -80,13 +80,20 @@
           <div class="kc-input-area">
             <div class="kc-input-wrap">
               <textarea v-model="input" class="kc-input" rows="2"
-                        placeholder="输入你的问题，比如：注意力机制和 self-attention 有什么区别？"
+                        :placeholder="voiceProcessing ? '识别中…' : (listening ? '正在聆听，请说话…' : '输入你的问题，比如：注意力机制和 self-attention 有什么区别？')"
                         :disabled="loading"
                         @keydown.enter.exact.prevent="send" />
+              <button v-if="voiceSupported" class="kc-voice-btn" :class="{ listening }" @click="toggleVoice"
+                      :disabled="loading"
+                      :title="voiceProcessing ? '识别中…' : (listening ? `停止录音 (${voiceElapsed}s)` : '语音提问')">
+                <span v-if="voiceProcessing" class="loading-spinner" style="width:14px;height:14px;border-width:2px;"></span>
+                <DSIcon v-else :name="listening ? 'square' : 'mic'" :size="16" />
+              </button>
               <button class="kc-send-btn" :disabled="loading || !input.trim()" @click="send">
                 <DSIcon name="arrow-right" :size="18" color="#fff" />
               </button>
             </div>
+            <div v-if="voiceError" class="kc-hint" style="color:#ef4444;">{{ voiceError }}</div>
             <div class="kc-hint">回答基于你的知识库内容生成，低相关度时可能不准确</div>
           </div>
         </template>
@@ -111,6 +118,7 @@ import { useRouter } from 'vue-router'
 import TopNav from '../../components/TopNav.vue'
 import DSIcon from '../../components/DSIcon.vue'
 import { renderMarkdown } from '../../utils/markdown'
+import { useVoiceInput } from '../../composables/useVoiceInput'
 import 'katex/dist/katex.min.css'   // 数学公式排版样式 (markdown.js 渲染 $/$$ 公式)
 import {
   kbQa, kbChatListSessions, kbChatCreateSession,
@@ -186,6 +194,27 @@ async function deleteSess(id) {
       messages.value = []
     }
   }
+}
+
+// ---- 语音提问 (v1.1): 本地 SenseVoice 识别 (后端 /api/asr), 结果填入输入框待确认发送 ----
+const {
+  supported: voiceSupported,
+  recording: listening,
+  processing: voiceProcessing,
+  error: voiceError,
+  elapsed: voiceElapsed,
+  start: startVoice,
+  stop: stopVoice,
+} = useVoiceInput({
+  onResult(text) { input.value = input.value ? `${input.value} ${text}` : text },
+})
+
+async function toggleVoice() {
+  if (listening.value) {
+    stopVoice()
+    return
+  }
+  await startVoice()
 }
 
 async function send(question) {
@@ -461,6 +490,14 @@ onMounted(async () => {
 .kc-send-btn { width: 36px; height: 36px; background: var(--brand-700, #4338ca); border: none; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.15s; }
 .kc-send-btn:hover:not(:disabled) { background: var(--brand-800, #3730a3); }
 .kc-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+/* 语音提问 (v1.1): 录音中红底白图标, 识别中转圈 */
+.kc-voice-btn { width: 36px; height: 36px; background: #fff; border: 1px solid var(--border-color, #e5e7eb); border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--text-secondary, #6b7280); transition: background 0.15s, border-color 0.15s; }
+.kc-voice-btn:hover:not(:disabled) { background: var(--brand-50, #eef2ff); border-color: var(--brand-400, #818cf8); color: var(--brand-700, #4338ca); }
+.kc-voice-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.kc-voice-btn.listening { background: #ef4444; border-color: #ef4444; color: #fff; animation: kc-voice-pulse 1.2s ease-in-out infinite; }
+@keyframes kc-voice-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); } 50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); } }
+.loading-spinner { display:inline-block; width:16px; height:16px; border:2px solid var(--border-color, #e5e7eb); border-top-color: var(--brand-700, #4338ca); border-radius:50%; animation: kc-spin 0.8s linear infinite; }
+@keyframes kc-spin { to { transform: rotate(360deg); } }
 .kc-hint { font-size: 11px; color: var(--text-faint, #9ca3af); text-align: center; margin-top: 8px; }
 
 @media (max-width: 720px) {

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>岗位匹配 · AI 模拟面试官</title>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="assets/css/tokens.css">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/components.css">
+<style>
+  /* 简历摘要条 */
+  .resume-strip {
+    display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+    padding: 18px 24px;
+    border: 1px solid var(--line);
+    background: var(--sheet-2);
+    border-left: 3px solid var(--pine);
+  }
+  .resume-strip .who { display: flex; align-items: center; gap: 12px; }
+  .resume-strip .stamp-mini {
+    width: 42px; height: 42px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--ink); color: var(--paper);
+    font-family: var(--f-display); font-weight: 900; font-size: 19px;
+  }
+  .resume-strip .name { font-family: var(--f-display); font-weight: 900; font-size: 17px; }
+  .resume-strip .meta { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }
+  .resume-strip .skills { display: flex; gap: 7px; flex-wrap: wrap; margin-left: auto; }
+
+  /* 岗位卡片 */
+  .role-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 22px; margin-top: 34px; }
+  .role-card { padding: 26px 26px 22px; display: flex; flex-direction: column; gap: 16px; position: relative; overflow: hidden; }
+  .role-card .no { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.18em; color: var(--ink-4); }
+  .role-card h3 { font-size: 20px; margin-top: -6px; }
+  .role-card .tags { display: flex; gap: 7px; flex-wrap: wrap; }
+  .role-card .foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-top: auto; padding-top: 18px; border-top: 1px solid var(--line); }
+  .role-card .match { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+  .role-card .match .row { display: flex; align-items: baseline; gap: 8px; }
+  .role-card .match .pct { font-family: var(--f-mono); font-weight: 700; font-size: 24px; letter-spacing: -0.03em; }
+  .role-card .match .k { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-4); }
+  .role-card .bar { height: 4px; background: var(--line-soft); position: relative; }
+  .role-card .bar i { position: absolute; inset: 0 auto 0 0; background: var(--ink); transition: width 1s var(--ease); }
+  .role-card.is-best .bar i { background: var(--vermilion); }
+  .role-card.is-best { border-color: var(--line-strong); box-shadow: var(--sh-lift); }
+  .role-card.is-best::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(320px 160px at 100% 0%, var(--verm-wash), transparent 70%);
+  }
+
+  .foot-note {
+    margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4);
+  }
+
+  @media (max-width: 700px) { .resume-strip .skills { margin-left: 0; } }
+</style>
+</head>
+<body data-shell="app" data-page="resume">
+
+<div class="shell">
+  <aside class="rail"></aside>
+  <div class="rail-scrim"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:14px">
+        <button class="icon-btn rail-toggle" aria-label="菜单"><span data-ic="menu"></span></button>
+        <div class="crumb"><span>卷·03</span><span class="sep">/</span><b>岗位匹配</b></div>
+      </div>
+      <div class="topbar-actions">
+        <a class="tlink" href="resume.html"><span data-ic="arrowLeft"></span>返回上传</a>
+      </div>
+    </div>
+
+    <div class="page-body">
+      <div class="page-head rv">
+        <span class="sec-index">RESUME → ROLE</span>
+        <h1 class="page-title" style="margin-top:14px">挑一个方向，开始练</h1>
+        <p class="page-sub">按技能画像匹配到的岗位已排在最前，也可以选择其他方向——每张卡片都是一场完整面试。</p>
+      </div>
+
+      <div class="resume-strip rv" data-d="0.06s">
+        <div class="who">
+          <span class="stamp-mini">高</span>
+          <span>
+            <span class="name">高捷</span>
+            <span class="meta" style="display:block">已完成简历分析 · 8 项技能</span>
+          </span>
+        </div>
+        <div class="skills">
+          <span class="tag">RAG</span><span class="tag">LangGraph</span><span class="tag">向量检索</span>
+          <span class="tag">提示词工程</span><span class="tag">+5</span>
+        </div>
+      </div>
+
+      <div class="role-grid" data-stagger>
+        <!-- 推荐 -->
+        <article class="role-card sheet sheet-hover is-best rv" data-meter>
+          <span class="corner-tag verm">推荐 · MATCH</span>
+          <span class="no">№ 01</span>
+          <h3>大模型应用开发工程师</h3>
+          <div class="tags">
+            <span class="tag">RAG</span><span class="tag">Agent</span><span class="tag">Transformer</span>
+            <span class="tag">LangChain</span><span class="tag">MCP</span>
+          </div>
+          <div class="foot">
+            <div class="match">
+              <div class="row"><span class="pct">92</span><span class="k">% 匹配度</span></div>
+              <div class="bar"><i data-w="92" style="width:0"></i></div>
+            </div>
+            <a class="btn btn-sm" href="interview.html">开始面试<span class="ar" data-ic="arrowRight"></span></a>
+          </div>
+        </article>
+
+        <article class="role-card sheet sheet-hover rv" data-meter>
+          <span class="no">№ 02</span>
+          <h3>RAG 算法工程师</h3>
+          <div class="tags">
+            <span class="tag">向量检索</span><span class="tag">重排</span><span class="tag">分块策略</span>
+          </div>
+          <div class="foot">
+            <div class="match">
+              <div class="row"><span class="pct">78</span><span class="k">% 匹配度</span></div>
+              <div class="bar"><i data-w="78" style="width:0"></i></div>
+            </div>
+            <a class="btn btn-sm btn-ghost" href="interview.html">开始面试<span class="ar" data-ic="arrowRight"></span></a>
+          </div>
+        </article>
+
+        <article class="role-card sheet sheet-hover rv" data-meter>
+          <span class="no">№ 03</span>
+          <h3>AI Agent 工程师</h3>
+          <div class="tags">
+            <span class="tag">工具调用</span><span class="tag">Memory</span><span class="tag">LangGraph</span>
+          </div>
+          <div class="foot">
+            <div class="match">
+              <div class="row"><span class="pct">74</span><span class="k">% 匹配度</span></div>
+              <div class="bar"><i data-w="74" style="width:0"></i></div>
+            </div>
+            <a class="btn btn-sm btn-ghost" href="interview.html">开始面试<span class="ar" data-ic="arrowRight"></span></a>
+          </div>
+        </article>
+
+        <article class="role-card sheet sheet-hover rv" data-meter>
+          <span class="no">№ 04</span>
+          <h3>提示词工程师</h3>
+          <div class="tags">
+            <span class="tag">提示词工程</span><span class="tag">评测</span><span class="tag">结构化输出</span>
+          </div>
+          <div class="foot">
+            <div class="match">
+              <div class="row"><span class="pct">69</span><span class="k">% 匹配度</span></div>
+              <div class="bar"><i data-w="69" style="width:0"></i></div>
+            </div>
+            <a class="btn btn-sm btn-ghost" href="interview.html">开始面试<span class="ar" data-ic="arrowRight"></span></a>
+          </div>
+        </article>
+      </div>
+
+      <div class="foot-note">
+        <span>匹配度 = 技能与岗位标签的命中比例</span>
+        <span>演示数据 · 实际以接口返回为准</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/app.js"></script>
+</body>
+</html>

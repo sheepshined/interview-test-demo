@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>选择岗位 · AI 模拟面试官</title>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="assets/css/tokens.css">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/components.css">
+<style>
+  .setup-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: clamp(28px, 4vw, 52px); align-items: start; }
+
+  .block { margin-bottom: 40px; }
+  .block-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
+  .block-head .no { font-family: var(--f-mono); font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: var(--vermilion); }
+  .block-head h3 { font-size: 20px; }
+  .block-head .hint { margin-left: auto; font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4); }
+
+  /* 岗位选择 */
+  .role-picks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .role-pick { text-align: left; padding: 20px 20px 18px; }
+  .role-pick .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .role-pick .t { font-family: var(--f-display); font-weight: 900; font-size: 16.5px; line-height: 1.4; }
+  .role-pick .n { font-family: var(--f-mono); font-size: 10.5px; color: var(--ink-4); }
+  .role-pick .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+  .role-pick .tags .tag { font-size: 11.5px; padding: 3px 9px; }
+  .role-pick.is-on .t { color: var(--vermilion-deep); }
+  .role-pick.is-on .n { color: var(--vermilion); }
+  .role-pick.is-on .tag { border-color: var(--verm-line); color: var(--vermilion-deep); }
+
+  /* 题量选择 */
+  .count-picks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .count-pick { text-align: center; padding: 20px 12px 16px; }
+  .count-pick .num { font-family: var(--f-mono); font-weight: 700; font-size: 30px; line-height: 1; letter-spacing: -0.04em; }
+  .count-pick .unit { font-size: 12px; color: var(--ink-3); margin-top: 6px; }
+  .count-pick .est { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-4); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .count-pick.is-on .num { color: var(--vermilion-deep); }
+  .count-pick.is-on .est { border-color: var(--verm-line); color: var(--vermilion-deep); }
+
+  /* 右侧：本场说明 */
+  .brief { position: sticky; top: 92px; }
+  .brief-rows { border-top: 1px solid var(--line-strong); }
+  .brief-row { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 15px 2px; border-bottom: 1px solid var(--line); }
+  .brief-row .k { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+  .brief-row .v { font-size: 14px; text-align: right; }
+  .brief-row .v b { font-family: var(--f-display); font-weight: 900; font-size: 15px; }
+
+  .persona-list li { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px dashed var(--line); font-size: 13px; color: var(--ink-2); }
+  .persona-list li:last-child { border-bottom: 0; }
+  .persona-list .ic { color: var(--indigo-ink); flex-shrink: 0; margin-top: 2px; }
+  .persona-list b { color: var(--ink); }
+
+  .feature-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+  .start-bar {
+    margin-top: 26px; padding: 20px;
+    background: var(--ink); color: var(--room-ink);
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .start-bar .summary { font-size: 13px; color: rgba(240,234,216,.72); }
+  .start-bar .summary b { color: var(--room-ink); }
+  .start-bar .btn { --btn-bg: var(--vermilion); border-color: var(--vermilion); }
+  .start-bar .btn::before { background: var(--room-ink); }
+
+  @media (max-width: 1080px) {
+    .setup-grid { grid-template-columns: 1fr; }
+    .brief { position: static; }
+  }
+  @media (max-width: 620px) {
+    .role-picks { grid-template-columns: 1fr; }
+    .count-picks { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body data-shell="app" data-page="choose">
+
+<div class="shell">
+  <aside class="rail"></aside>
+  <div class="rail-scrim"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:14px">
+        <button class="icon-btn rail-toggle" aria-label="菜单"><span data-ic="menu"></span></button>
+        <div class="crumb"><span>卷·03</span><span class="sep">/</span><b>选择岗位</b></div>
+      </div>
+      <div class="topbar-actions">
+        <a class="tlink" href="resume.html">改用简历匹配<span data-ic="arrowRight"></span></a>
+      </div>
+    </div>
+
+    <div class="page-body">
+      <div class="page-head rv">
+        <span class="sec-index">CONFIGURATION</span>
+        <h1 class="page-title" style="margin-top:14px">设定本场面试</h1>
+        <p class="page-sub">选择目标岗位与题量，其余交给面试官——出题范围、追问深度都按这个方向展开。</p>
+      </div>
+
+      <div class="setup-grid">
+        <!-- 左：配置 -->
+        <div>
+          <div class="block rv" data-d="0.05s">
+            <div class="block-head">
+              <span class="no">01</span><h3>岗位类别</h3>
+              <span class="hint">选择 1 个方向</span>
+            </div>
+            <div class="role-picks" id="rolePicks">
+              <button class="pick role-pick is-on" data-title="大模型应用开发工程师">
+                <div class="head"><span class="t">大模型应用开发工程师</span><span class="n">№01</span></div>
+                <div class="tags"><span class="tag">RAG</span><span class="tag">Agent</span><span class="tag">LangChain</span></div>
+              </button>
+              <button class="pick role-pick" data-title="RAG 算法工程师">
+                <div class="head"><span class="t">RAG 算法工程师</span><span class="n">№02</span></div>
+                <div class="tags"><span class="tag">向量检索</span><span class="tag">重排</span></div>
+              </button>
+              <button class="pick role-pick" data-title="AI Agent 工程师">
+                <div class="head"><span class="t">AI Agent 工程师</span><span class="n">№03</span></div>
+                <div class="tags"><span class="tag">工具调用</span><span class="tag">Memory</span></div>
+              </button>
+              <button class="pick role-pick" data-title="提示词工程师">
+                <div class="head"><span class="t">提示词工程师</span><span class="n">№04</span></div>
+                <div class="tags"><span class="tag">提示词工程</span><span class="tag">评测</span></div>
+              </button>
+            </div>
+          </div>
+
+          <div class="block rv" data-d="0.12s">
+            <div class="block-head">
+              <span class="no">02</span><h3>面试题量</h3>
+              <span class="hint">题量越多，追问越深</span>
+            </div>
+            <div class="count-picks" id="countPicks">
+              <button class="pick count-pick" data-num="5" data-est="约 10 分钟"><div class="num">5</div><div class="unit">题</div><div class="est">约 10 分钟</div></button>
+              <button class="pick count-pick is-on" data-num="8" data-est="约 15 分钟"><div class="num">8</div><div class="unit">题</div><div class="est">约 15 分钟</div></button>
+              <button class="pick count-pick" data-num="10" data-est="约 20 分钟"><div class="num">10</div><div class="unit">题</div><div class="est">约 20 分钟</div></button>
+              <button class="pick count-pick" data-num="15" data-est="约 28 分钟"><div class="num">15</div><div class="unit">题</div><div class="est">约 28 分钟</div></button>
+            </div>
+          </div>
+
+          <div class="block rv" data-d="0.18s">
+            <div class="block-head"><span class="no">03</span><h3>本场能力项</h3></div>
+            <div class="feature-pills">
+              <span class="tag"><span data-ic="mic"></span>语音输入作答</span>
+              <span class="tag"><span data-ic="volume"></span>面试官语音朗读</span>
+              <span class="tag"><span data-ic="bulb"></span>每题 2 次提示</span>
+              <span class="tag"><span data-ic="quote"></span>低分自动追问</span>
+              <span class="tag"><span data-ic="records"></span>逐题记录留档</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右：本场说明 -->
+        <aside class="brief rv" data-d="0.1s">
+          <div class="sheet sheet-pad">
+            <div class="mono" style="margin-bottom:10px">Session Brief</div>
+            <h3 class="d3" style="margin-bottom:6px">本场说明</h3>
+            <p style="font-size:13.5px; color:var(--ink-3); line-height:1.85; margin-bottom:18px">
+              出题基于混合检索题库（BM25 + 向量，RRF 融合），并会结合你的简历上下文。
+            </p>
+
+            <div class="brief-rows">
+              <div class="brief-row"><span class="k">岗位</span><span class="v"><b id="sumRole">大模型应用开发工程师</b></span></div>
+              <div class="brief-row"><span class="k">题量</span><span class="v"><b id="sumCount">8</b> 题</span></div>
+              <div class="brief-row"><span class="k">预计时长</span><span class="v" id="sumEst">约 15 分钟</span></div>
+              <div class="brief-row"><span class="k">难度</span><span class="v">Intermediate · 进阶</span></div>
+            </div>
+
+            <div style="margin-top:22px">
+              <div class="mono" style="margin-bottom:8px">面试官人设 · 随机其一</div>
+              <ul class="persona-list">
+                <li><span data-ic="user"></span><span><b>严谨 CTO</b> · 直奔技术核心，追问『为什么』与底层原理</span></li>
+                <li><span data-ic="user"></span><span><b>温和 HR</b> · 先肯定再引导，关注表达与项目经验</span></li>
+                <li><span data-ic="user"></span><span><b>技术深挖型</b> · 层层递进，从概念到实现再到边界</span></li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="start-bar">
+            <div class="summary">本场配置：<b id="sumRole2">大模型应用开发工程师</b> · <b id="sumCount2">8</b> 题 · 可随时提前结束</div>
+            <a class="btn btn-lg btn-block" href="interview.html">进入面试间<span class="ar" data-ic="arrowRight"></span></a>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/app.js"></script>
+<script>
+  /* 单选交互 + 摘要同步 */
+  function bindPickGroup(sel, onPick) {
+    const box = document.querySelector(sel);
+    box.querySelectorAll('.pick').forEach((p) => p.addEventListener('click', () => {
+      box.querySelectorAll('.pick').forEach((x) => x.classList.toggle('is-on', x === p));
+      onPick(p);
+    }));
+  }
+  bindPickGroup('#rolePicks', (p) => {
+    sumRole.textContent = p.dataset.title;
+    sumRole2.textContent = p.dataset.title;
+  });
+  bindPickGroup('#countPicks', (p) => {
+    sumCount.textContent = p.dataset.num;
+    sumCount2.textContent = p.dataset.num;
+    sumEst.textContent = p.dataset.est;
+  });
+</script>
+</body>
+</html>

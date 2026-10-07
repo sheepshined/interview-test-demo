@@ -40,3 +40,6 @@ pymupdf>=1.24.0
 # ===== Utils =====
 python-dotenv>=1.0.0
 numpy>=1.24.0
+
+# ===== 本地语音识别 (v1.1): SenseVoice ONNX 推理, 纯 CPU 离线 =====
+sherpa-onnx>=1.10

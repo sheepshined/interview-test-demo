@@ -188,3 +188,10 @@ export function kbFileUrl(path) {
   const token = encodeURIComponent(getToken() || '')
   return `/api/kb/files/${name}?token=${token}`
 }
+
+// 本地语音识别 (v1.1): WAV 音频 → 后端 SenseVoice 离线转文本
+export const transcribeAudio = (blob) => {
+  const fd = new FormData()
+  fd.append('file', blob, 'voice.wav')
+  return request('/asr', { method: 'POST', body: fd, timeout: 30000 })
+}

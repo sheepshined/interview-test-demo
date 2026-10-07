@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>面试记录 · AI 模拟面试官</title>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="assets/css/tokens.css">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/components.css">
+<style>
+  .rec-layout { display: grid; grid-template-columns: 372px 1fr; gap: 26px; align-items: start; }
+
+  /* ── 左：档案清单 ── */
+  .rec-list { border: 1px solid var(--line); background: var(--sheet); }
+  .rec-list-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 16px 18px; border-bottom: 1px solid var(--line-strong);
+  }
+  .rec-list-head .t { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-3); }
+  .rec-item {
+    position: relative; width: 100%; text-align: left;
+    display: flex; align-items: center; gap: 14px;
+    padding: 16px 18px; border-bottom: 1px solid var(--line);
+    transition: background var(--dur-1) ease, padding-left var(--dur-2) var(--ease);
+    cursor: pointer;
+  }
+  .rec-item:last-child { border-bottom: 0; }
+  .rec-item:hover { background: var(--sheet-2); padding-left: 22px; }
+  .rec-item.is-on { background: var(--sheet-2); }
+  .rec-item.is-on::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--vermilion); }
+  .rec-item .idx { font-family: var(--f-mono); font-size: 11px; color: var(--ink-4); }
+  .rec-item .body { min-width: 0; flex: 1; }
+  .rec-item .role { font-family: var(--f-display); font-weight: 900; font-size: 15px; }
+  .rec-item .meta { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-family: var(--f-mono); font-size: 10.5px; color: var(--ink-4); letter-spacing: 0.06em; }
+  .rec-item .del { opacity: 0; color: var(--ink-4); transition: all var(--dur-1) ease; flex-shrink: 0; }
+  .rec-item:hover .del { opacity: 1; }
+  .rec-item .del:hover { color: var(--vermilion); }
+
+  /* ── 右：文档视图 ── */
+  .rec-doc { border: 1px solid var(--line); background: var(--sheet); display: flex; flex-direction: column; min-height: 620px; }
+  .rec-doc-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 18px 26px; border-bottom: 1px solid var(--line-strong);
+  }
+  .rec-doc-head .fname { font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); letter-spacing: 0.04em; }
+  .rec-doc-head .sub { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-4); margin-top: 4px; }
+  .rec-doc-body { padding: 26px clamp(22px, 3vw, 40px); overflow-y: auto; max-height: 720px; }
+
+  .md-h { font-family: var(--f-display); font-weight: 900; font-size: 17px; margin: 24px 0 10px; }
+  .md-h:first-child { margin-top: 0; }
+  .md-sub { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--vermilion); margin: 20px 0 8px; }
+  .md-p { font-size: 14px; line-height: 2; color: var(--ink-2); }
+  .md-li { font-size: 14px; line-height: 2; color: var(--ink-2); padding-left: 16px; position: relative; }
+  .md-li::before { content: '·'; position: absolute; left: 4px; color: var(--vermilion); }
+
+  /* 逐题块 */
+  .qa { border-left: 2px solid var(--line); padding: 4px 0 4px 18px; margin: 18px 0; }
+  .qa .who { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 6px; }
+  .qa .q-text { font-family: var(--f-display); font-weight: 700; font-size: 15.5px; line-height: 1.9; margin-bottom: 12px; }
+  .qa .a-text { font-size: 13.5px; line-height: 1.95; color: var(--ink-2); }
+  .qa .score {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 10px; padding: 3px 10px;
+    font-family: var(--f-mono); font-size: 11px; font-weight: 700;
+    border: 1px solid var(--line-strong);
+  }
+  .qa .score.hi { border-color: rgba(46,107,80,.4); color: var(--pine); background: var(--pine-wash); }
+  .qa .score.lo { border-color: var(--verm-line); color: var(--vermilion); background: var(--verm-wash); }
+
+  @media (max-width: 1080px) { .rec-layout { grid-template-columns: 1fr; } .rec-doc { min-height: auto; } }
+</style>
+</head>
+<body data-shell="app" data-page="records">
+
+<div class="shell">
+  <aside class="rail"></aside>
+  <div class="rail-scrim"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:14px">
+        <button class="icon-btn rail-toggle" aria-label="菜单"><span data-ic="menu"></span></button>
+        <div class="crumb"><span>卷·04</span><span class="sep">/</span><b>面试记录</b></div>
+      </div>
+      <div class="topbar-actions">
+        <button class="tlink" onclick="toast('已刷新记录列表','refresh')"><span data-ic="refresh"></span>刷新</button>
+      </div>
+    </div>
+
+    <div class="page-body">
+      <div class="page-head rv">
+        <span class="sec-index">ARCHIVE</span>
+        <h1 class="page-title" style="margin-top:14px">每场面试，都留了底稿</h1>
+        <p class="page-sub">逐题问答自动保存为 Markdown 档案，按用户隔离；可随时回看、复制与删除。</p>
+      </div>
+
+      <div class="rec-layout">
+        <!-- 左：清单 -->
+        <div class="rec-list rv" data-d="0.05s">
+          <div class="rec-list-head">
+            <span class="t">Records · 4 份</span>
+            <span class="mono">按时间倒序</span>
+          </div>
+
+          <button class="rec-item is-on">
+            <span class="idx">01</span>
+            <span class="body">
+              <span class="role">大模型应用开发工程师</span>
+              <span class="meta"><span>Intermediate</span><span>·</span><span>8 题</span><span>·</span><span>10-04 14:09</span></span>
+            </span>
+            <span class="del" title="删除"><span data-ic="trash"></span></span>
+          </button>
+
+          <button class="rec-item">
+            <span class="idx">02</span>
+            <span class="body">
+              <span class="role">RAG 算法工程师</span>
+              <span class="meta"><span>Intermediate</span><span>·</span><span>5 题</span><span>·</span><span>10-02 21:36</span></span>
+            </span>
+            <span class="del" title="删除"><span data-ic="trash"></span></span>
+          </button>
+
+          <button class="rec-item">
+            <span class="idx">03</span>
+            <span class="body">
+              <span class="role">AI Agent 工程师</span>
+              <span class="meta"><span>Senior</span><span>·</span><span>10 题</span><span>·</span><span>09-28 19:02</span></span>
+            </span>
+            <span class="del" title="删除"><span data-ic="trash"></span></span>
+          </button>
+
+          <button class="rec-item">
+            <span class="idx">04</span>
+            <span class="body">
+              <span class="role">提示词工程师</span>
+              <span class="meta"><span>Junior</span><span>·</span><span>5 题</span><span>·</span><span>09-21 10:15</span></span>
+            </span>
+            <span class="del" title="删除"><span data-ic="trash"></span></span>
+          </button>
+        </div>
+
+        <!-- 右：档案视图 -->
+        <div class="rec-doc rv" data-d="0.12s">
+          <div class="rec-doc-head">
+            <div>
+              <div class="fname">20261004_1409_大模型应用开发工程师.md</div>
+              <div class="sub">Record · 8 questions · 13:41</div>
+            </div>
+            <div style="display:flex; gap:10px">
+              <button class="btn btn-sm btn-ghost" data-copy="#recContent"><span data-ic="copy"></span>复制</button>
+              <a class="btn btn-sm" href="summary.html">看报告<span class="ar" data-ic="arrowRight"></span></a>
+            </div>
+          </div>
+
+          <div class="rec-doc-body" id="recContent">
+            <div class="md-sub">用户: admin · 岗位: 大模型应用开发工程师 · 难度: Intermediate · 题量: 8</div>
+            <h2 class="md-h">面试逐题记录</h2>
+
+            <div class="qa">
+              <div class="who">Q1 · 自我介绍</div>
+              <div class="q-text">先用一分钟做个自我介绍吧。</div>
+              <div class="a-text">我主要做 RAG 方向的落地，做过一个基于 LangGraph 的模拟面试系统：题库用 BM25 加向量双路召回、RRF 融合排序，会话侧用人在回路中断来等待用户作答，报告会按四个维度打分并给出学习建议。</div>
+              <div class="score hi">评分 8.5 · 结构清晰</div>
+            </div>
+
+            <div class="qa">
+              <div class="who">Q2 · 检索链路</div>
+              <div class="q-text">请说说你的 RAG 项目里，从文档到召回的完整链路是怎样的？为什么要引入重排？</div>
+              <div class="a-text">文档先按语义边界切块，长文走父文档策略：子块建索引、父块作为返回单元。召回时 BM25 负责关键词命中，向量负责语义相近，两路各取 Top20 后用 RRF 融合。重排是把候选交给交叉编码器精排，因为双塔向量召回的相似度是粗粒度的，重排后 Top3 的命中率明显更稳。</div>
+              <div class="score hi">评分 8.8 · 细节可信</div>
+            </div>
+
+            <div class="qa">
+              <div class="who">Q3 · 评估与幻觉 <span style="color:var(--vermilion)">· 已追问</span></div>
+              <div class="q-text">你们怎么判断 RAG 的回答有没有幻觉？如果要你设计一套评估方案，你会用哪些指标，怎么构造评测集？</div>
+              <div class="a-text">主要看回答是不是有支撑。可以用 Faithfulness 之类的指标，评测集的话……可以人工标一批数据来做验证，也可以让模型自己当裁判。</div>
+              <div class="score lo">评分 6.2 · 缺少方法</div>
+            </div>
+
+            <div class="qa">
+              <div class="who">追问 · 检索指标</div>
+              <div class="q-text">如果检索本身没召回正确段落，你的评估方案能区分出来吗？</div>
+              <div class="a-text">可以分开看，检索侧看 Context Recall 和命中率，生成侧看回答与上下文的一致性，两类问题要分开定指标。</div>
+              <div class="score hi">评分 7.6 · 及时修正</div>
+            </div>
+
+            <div class="qa">
+              <div class="who">Q4 · Agent 工具调用</div>
+              <div class="q-text">你的系统里 Agent 是怎么决定调用哪个工具的？</div>
+              <div class="a-text">用 Function Calling 把工具定义成 schema 交给模型，由模型输出调用意图，工程侧再做参数校验与重试。</div>
+              <div class="score">评分 7.9</div>
+            </div>
+
+            <div class="qa">
+              <div class="who">Q5 – Q8 · 概要</div>
+              <div class="q-text">Memory 设计 / 微调数据构造 / 部署与性能 / 项目复盘</div>
+              <div class="a-text">整体表现稳定，Memory 与部署两题偏浅；项目复盘题能主动提出改进方向，收尾较好。</div>
+              <div class="score">平均 8.0</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/app.js"></script>
+<script>
+  /* 清单切换（演示） */
+  document.querySelectorAll('.rec-item').forEach((it) => it.addEventListener('click', (e) => {
+    if (e.target.closest('.del')) { e.stopPropagation(); toast('已删除该记录'); return; }
+    if (it.classList.contains('is-on')) return;
+    document.querySelectorAll('.rec-item').forEach((x) => x.classList.toggle('is-on', x === it));
+    toast(`演示：将加载「${it.querySelector('.role').textContent}」的逐题记录`);
+  }));
+</script>
+</body>
+</html>

@@ -42,12 +42,14 @@ from retrieval.retriever import HybridRetriever
 from resume.parser import parse_resume, build_resume_context
 import config
 import auth
+import asr
 import knowledge
-import kb_vectors
+import kb_parent
 import kb_extract
 import kb_llm
 from auth import get_current_user, ws_authenticate
 from common import match_role, get_difficulty_label, extract_skills
+from starlette.concurrency import run_in_threadpool
 from agent.graph import build_interview_graph
 from agent.protocol import command_allowed, phase_error
 from agent.chains import build_hint_chain
@@ -410,6 +412,35 @@ def _report_owner(meta: Optional[dict]) -> str:
     return (meta or {}).get("username") or "admin"
 
 
+# ---------- v1.1: 本地语音识别 (SenseVoice ONNX, 完全离线) ----------
+
+@app.post("/api/asr")
+async def api_asr(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    """WAV 音频 → 文本。模型与推理全在本地 (SenseVoice int8), 不联网不耗 token。
+
+    供面试答题输入与知识库问答输入共用; 解码是 CPU 密集操作,
+    丢线程池执行避免阻塞事件循环。
+    """
+    if not asr.available():
+        return JSONResponse(
+            status_code=503,
+            content={"success": False,
+                     "error": "语音识别模型未就绪: 请将 SenseVoice 模型放到 backend/models/ "
+                              "(见 .gitignore 中说明, 从 ~/.dsh/speech-to-text/ 拷贝)"},
+        )
+    data = await file.read()
+    if not data:
+        return {"success": False, "error": "音频内容为空"}
+    try:
+        result = await run_in_threadpool(asr.transcribe_wav_bytes, data)
+    except ValueError as e:  # 位深/时长等音频格式问题
+        return {"success": False, "error": str(e)}
+    except Exception:
+        _logger.exception("ASR 识别失败")
+        return {"success": False, "error": "识别失败, 请重试"}
+    return {"success": True, **result}
+
+
 @app.get("/api/reports")
 def api_list_reports(user: dict = Depends(get_current_user)):
     """列出当前用户的历史面试报告 (读 reports/*.json 元信息, 按用户隔离)"""
@@ -644,8 +675,8 @@ class UrlNoteRequest(BaseModel):
 
 
 def _kb_after_write(username: str, note: dict, note_id: int) -> None:
-    """写入后处理: 向量同步 (失败不阻断)。"""
-    kb_vectors.upsert_note(username, note)
+    """写入后处理: 父文档索引同步 (失败不阻断)。"""
+    kb_parent.sync_note(username, note)
 
 
 @app.get("/api/kb/notes")
@@ -705,7 +736,7 @@ def api_kb_update_note(note_id: int, req: NoteRequest,
 def api_kb_delete_note(note_id: int, user: dict = Depends(get_current_user)):
     if not knowledge.delete_note(user["username"], note_id):
         return JSONResponse(status_code=404, content={"success": False, "message": "笔记不存在"})
-    kb_vectors.delete_note(user["username"], note_id)
+    kb_parent.remove_note(user["username"], note_id)
     return {"success": True}
 
 
@@ -759,7 +790,7 @@ def api_kb_upload(files: List[UploadFile] = File(...),
                 file_name=name, file_path=file_url,
             )
             note = knowledge.get_note(user["username"], created["id"])
-            kb_vectors.upsert_note(user["username"], note)
+            kb_parent.sync_note(user["username"], note)
             entry.update(status="created", title=created["title"],
                          note_id=created["id"], llm_used=structured["llm_used"],
                          pages=extracted["pages"], extract_mode=extracted["extract_mode"])
@@ -828,7 +859,7 @@ def api_kb_create_url_note(req: UrlNoteRequest, user: dict = Depends(get_current
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     note = knowledge.get_note(user["username"], result["id"])
-    kb_vectors.upsert_note(user["username"], note)
+    kb_parent.sync_note(user["username"], note)
     return {"success": True, **result}
 
 
@@ -838,9 +869,9 @@ def api_kb_create_url_note(req: UrlNoteRequest, user: dict = Depends(get_current
 def api_kb_search(q: str = "", top_k: int = 5,
                   user: dict = Depends(get_current_user)):
     """向量检索知识库; top1 相关度低于阈值时带 sparse 标记 (前端提示导入)。"""
-    results = kb_vectors.search(user["username"], q, top_k=top_k)
+    results = kb_parent.search(user["username"], q, top_k=top_k)
     return {"success": True, "results": results,
-            "sparse": kb_vectors.is_sparse(results)}
+            "sparse": kb_parent.is_sparse(results)}
 
 
 class KbQaRequest(BaseModel):
@@ -872,7 +903,7 @@ def api_kb_qa(req: KbQaRequest, user: dict = Depends(get_current_user)):
     knowledge.append_chat_message(session_id, "user", q)
 
     # 检索 + LLM
-    contexts = kb_vectors.search(username, q, top_k=req.top_k)
+    contexts = kb_parent.search(username, q, top_k=req.top_k)
     result = kb_llm.answer_from_knowledge(q, contexts)
 
     # 存 AI 回答
@@ -951,7 +982,7 @@ def api_kb_auto_category(note_id: int, user: dict = Depends(get_current_user)):
 @app.post("/api/kb/rebuild")
 def api_kb_rebuild(user: dict = Depends(get_current_user)):
     """手动触发该用户向量 + 语义关联全量重建。"""
-    stats = kb_vectors.rebuild(user["username"])
+    stats = kb_parent.rebuild(user["username"])
     return {"success": True, **stats}
 
 
@@ -972,9 +1003,9 @@ def api_kb_auto_link(note_id: int, user: dict = Depends(get_current_user)):
 
     query_text = f"{title}\n{content[:400]}"
     related = [
-        m for m in kb_vectors.search(user["username"], query_text, top_k=10)
+        m for m in kb_parent.search(user["username"], query_text, top_k=10)
         if m["note_id"] != note_id
-        and m["score"] >= kb_vectors.SEM_LINK_THRESHOLD
+        and m["score"] >= kb_parent.SEM_LINK_THRESHOLD
         and m.get("title")
     ][:3]
     # 只追加尚不存在的链接, 已有的不重复
@@ -992,7 +1023,7 @@ def api_kb_auto_link(note_id: int, user: dict = Depends(get_current_user)):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     fresh = knowledge.get_note(user["username"], note_id)
-    kb_vectors.upsert_note(user["username"], fresh)
+    kb_parent.sync_note(user["username"], fresh)
     return {"success": True, "linked": new_titles}
 
 
@@ -1012,7 +1043,7 @@ def api_kb_import_from_report(req: ReportImportRequest,
     created, skipped = [], []
     created_ids = set()   # 本轮新建笔记 id: 覆盖检测需排除 (避免"自我覆盖"误判)
     # 自动关联: 相关度达到语义边阈值才追加 [[双链]], 每条最多 3 条
-    LINK_SCORE = getattr(kb_vectors, "SEM_LINK_THRESHOLD", 0.66)
+    LINK_SCORE = getattr(kb_parent, "SEM_LINK_THRESHOLD", 0.66)
     LINK_TOP_K = 3
     for item in req.items[:50]:  # 防御性上限
         title = str(item.get("topic", "")).strip()[:knowledge.MAX_TITLE_LEN]
@@ -1041,7 +1072,7 @@ def api_kb_import_from_report(req: ReportImportRequest,
         try:
             query_text = f"{title} {suggestion}".strip()
             related = [
-                m for m in kb_vectors.search(user["username"], query_text, top_k=10)
+                m for m in kb_parent.search(user["username"], query_text, top_k=10)
                 if m["note_id"] not in created_ids
                 and m["score"] >= LINK_SCORE
                 and m.get("title")
@@ -1063,7 +1094,7 @@ def api_kb_import_from_report(req: ReportImportRequest,
         # 向量在最终内容(含双链)确定后再刷新, 保证后续检索能感知新链接
         note = knowledge.get_note(user["username"], result["id"])
         if note:
-            kb_vectors.upsert_note(user["username"], note)
+            kb_parent.sync_note(user["username"], note)
 
     # 覆盖检测: 每条薄弱点在知识库中检索相关内容 (向量库不可用时静默跳过)
     # 排除本轮刚创建的薄弱点笔记自身 —— 否则检索必然命中自己, 缺失提示永不触发
@@ -1072,16 +1103,16 @@ def api_kb_import_from_report(req: ReportImportRequest,
         topic = str(item.get("topic", "")).strip()
         if not topic:
             continue
-        raw_matched = kb_vectors.search(user["username"], topic, top_k=6)
+        raw_matched = kb_parent.search(user["username"], topic, top_k=6)
         matched = [m for m in raw_matched if m["note_id"] not in created_ids][:3]
         coverage.append({
             "topic": topic,
             "matched": [
                 {"note_id": m["note_id"], "title": m["title"],
                  "note_type": m["note_type"], "score": m["score"]}
-                for m in matched if m["score"] >= kb_vectors.SPARSE_THRESHOLD
+                for m in matched if m["score"] >= kb_parent.SPARSE_THRESHOLD
             ],
-            "sparse": kb_vectors.is_sparse(matched),
+            "sparse": kb_parent.is_sparse(matched),
         })
     return {"success": True, "created": created, "skipped": skipped,
             "coverage": coverage}

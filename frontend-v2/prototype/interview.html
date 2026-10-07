@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>模拟面试间 · AI 模拟面试官</title>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="assets/css/tokens.css">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/components.css">
+<style>
+  /* ============ 暗房：局部令牌覆写 ============ */
+  .room {
+    --paper: #191712;
+    --ink: #EFE9DA;
+    --ink-2: #C7C0B0;
+    --ink-3: #A79F8B;
+    --ink-4: #6F6857;
+    --line: rgba(240, 234, 216, 0.13);
+    --line-soft: rgba(240, 234, 216, 0.07);
+    --line-strong: rgba(240, 234, 216, 0.34);
+    --sheet: #211E17;
+    --sheet-2: #26221A;
+    --verm-wash: rgba(217, 58, 31, 0.14);
+    --verm-line: rgba(217, 58, 31, 0.5);
+    background: var(--room);
+    color: var(--room-ink);
+    min-height: 100vh;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+  .room::before {
+    content: '';
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(900px 460px at 50% -12%, rgba(240, 234, 216, 0.055), transparent 62%),
+      radial-gradient(520px 380px at 104% 104%, rgba(217, 58, 31, 0.07), transparent 60%);
+  }
+
+  /* ── 顶栏 ── */
+  .room-top {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 20px;
+    padding: 14px clamp(16px, 3vw, 30px);
+    border-bottom: 1px solid var(--line);
+    background: rgba(25, 23, 18, 0.86);
+    backdrop-filter: blur(8px);
+    z-index: 20;
+    flex-shrink: 0;
+  }
+  .room-left { display: flex; align-items: center; gap: 16px; min-width: 0; }
+  .room-exit {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 13px; color: var(--ink-3);
+    padding: 7px 11px; border: 1px solid transparent;
+    white-space: nowrap;
+    transition: all var(--dur-1) ease;
+  }
+  .room-exit:hover { color: var(--room-ink); border-color: var(--line); }
+  .room-role { font-family: var(--f-display); font-weight: 900; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .room-role small { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.16em; color: var(--ink-4); display: block; font-weight: 500; }
+
+  .room-progress { display: flex; flex-direction: column; align-items: center; gap: 9px; min-width: min(360px, 34vw); }
+  .room-progress .label { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-3); }
+  .room-progress .label b { color: var(--room-ink); }
+  .ticks-line { width: 100%; }
+  .ticks-line i { background: rgba(240, 234, 216, 0.14); }
+  .ticks-line i.done { background: rgba(240, 234, 216, 0.62); }
+  .ticks-line i.now { background: var(--vermilion); }
+
+  .room-right { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+  .tts-btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 12px; font-size: 12px;
+    border: 1px solid var(--line); color: var(--ink-3);
+    transition: all var(--dur-1) ease;
+  }
+  .tts-btn:hover { color: var(--room-ink); border-color: var(--line-strong); }
+  .tts-btn.is-on { color: var(--vermilion); border-color: var(--verm-line); background: var(--verm-wash); }
+  .timer { font-family: var(--f-mono); font-weight: 700; font-size: 15px; letter-spacing: 0.04em; }
+
+  /* 演示状态切换（评审用） */
+  .demo-switch { display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px dashed var(--line-strong); }
+  .demo-switch .lb { font-family: var(--f-mono); font-size: 9px; letter-spacing: 0.14em; color: var(--ink-4); padding: 0 8px 0 4px; text-transform: uppercase; }
+  .demo-switch button {
+    font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.08em;
+    padding: 5px 9px; color: var(--ink-3); border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .demo-switch button:hover { color: var(--room-ink); }
+  .demo-switch button.is-on { background: var(--vermilion); color: #FFF6EE; }
+
+  /* ── 主体 ── */
+  .room-body { position: relative; flex: 1; display: flex; min-height: 0; }
+
+  .transcript { flex: 1; overflow-y: auto; padding: clamp(24px, 4vh, 52px) clamp(20px, 4vw, 60px) 40px; scroll-behavior: smooth; }
+  .transcript-inner { max-width: 760px; margin: 0 auto; }
+
+  /* 消息 */
+  .msg { padding: 20px 0; border-bottom: 1px solid var(--line-soft); animation: msg-in 0.6s var(--ease) both; }
+  @keyframes msg-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  .msg:last-child { border-bottom: 0; }
+  .msg-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .msg-who {
+    font-family: var(--f-mono); font-size: 10px; font-weight: 700;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--vermilion);
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .msg-who::after { content: ''; width: 26px; height: 1px; background: var(--verm-line); }
+  .msg-time { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); letter-spacing: 0.1em; }
+  .msg-qid { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); margin-left: auto; letter-spacing: 0.08em; }
+
+  .msg-ai .msg-text { font-family: var(--f-display); font-weight: 700; font-size: 17.5px; line-height: 2; color: var(--room-ink); }
+  .msg-user .msg-head .msg-who { color: var(--indigo-ink); }
+  .msg-user .msg-head .msg-who::after { background: rgba(35, 64, 92, 0.6); }
+  .msg-user .msg-text {
+    font-size: 15px; line-height: 2; color: var(--ink-2);
+    padding-left: 18px; border-left: 2px solid var(--line-strong);
+  }
+
+  /* 反馈 / 追问 */
+  .msg-comment .msg-text {
+    font-size: 14px; line-height: 1.95; color: var(--ink-3); font-style: italic;
+    padding: 12px 18px; border-left: 2px solid var(--verm-line); background: rgba(240,234,216,.03);
+  }
+
+  /* 提示便签 */
+  .msg-hint .hint-card {
+    border: 1px dashed var(--verm-line);
+    background: rgba(217, 58, 31, 0.07);
+    padding: 14px 18px;
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .msg-hint .ic { color: var(--vermilion); flex-shrink: 0; margin-top: 3px; }
+  .msg-hint .txt { font-size: 13.5px; line-height: 1.9; color: var(--ink-2); }
+  .msg-hint .txt b { color: var(--vermilion); font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.1em; }
+
+  /* 系统状态 */
+  .msg-status { text-align: center; padding: 14px 0; }
+  .msg-status span { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-4); }
+
+  /* 思考中 */
+  .thinking { display: inline-flex; gap: 5px; align-items: center; padding: 6px 0; }
+  .thinking i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); animation: pulse 1.2s ease-in-out infinite; }
+  .thinking i:nth-child(2) { animation-delay: 0.18s; }
+  .thinking i:nth-child(3) { animation-delay: 0.36s; }
+
+  /* ── 右侧控制台 ── */
+  .console {
+    width: 306px; flex-shrink: 0;
+    border-left: 1px solid var(--line);
+    background: rgba(33, 30, 23, 0.55);
+    overflow-y: auto;
+    padding: 22px;
+    display: flex; flex-direction: column; gap: 18px;
+  }
+  .console .panel { border: 1px solid var(--line); background: rgba(240,234,216,.025); }
+  .console .panel-head {
+    padding: 13px 16px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-3);
+  }
+  .console .panel-body { padding: 14px 16px; }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 13px; }
+  .kv .k { color: var(--ink-4); }
+  .kv .v { color: var(--ink-2); font-family: var(--f-mono); font-size: 12.5px; }
+
+  .q-list li {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 0; font-size: 13px; color: var(--ink-4);
+    border-bottom: 1px dashed var(--line-soft);
+  }
+  .q-list li:last-child { border-bottom: 0; }
+  .q-list .qn { font-family: var(--f-mono); font-size: 11px; width: 30px; }
+  .q-list li.done { color: var(--ink-3); }
+  .q-list li.done .qn { color: var(--pine); }
+  .q-list li.now { color: var(--room-ink); font-weight: 600; }
+  .q-list li.now .qn { color: var(--vermilion); }
+  .q-list .state { margin-left: auto; font-family: var(--f-mono); font-size: 9.5px; letter-spacing: 0.12em; }
+
+  .rec-item { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px dashed var(--line-soft); }
+  .rec-item:last-child { border-bottom: 0; }
+  .rec-item .t { font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rec-item .d { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); }
+  .rec-item .del { opacity: 0; color: var(--ink-4); transition: all var(--dur-1) ease; flex-shrink: 0; }
+  .rec-item:hover .del { opacity: 1; }
+  .rec-item .del:hover { color: var(--vermilion); }
+
+  .end-btn {
+    width: 100%; padding: 11px; font-size: 13px;
+    border: 1px solid rgba(217, 58, 31, 0.4); color: var(--vermilion);
+    transition: all var(--dur-1) ease;
+  }
+  .end-btn:hover { background: var(--verm-wash); border-color: var(--vermilion); }
+
+  /* ── 作答台 ── */
+  .desk {
+    position: relative;
+    border-top: 1px solid var(--line);
+    background: rgba(25, 23, 18, 0.92);
+    backdrop-filter: blur(8px);
+    padding: 16px clamp(16px, 3vw, 30px) 18px;
+    flex-shrink: 0;
+  }
+  .desk-inner { max-width: 860px; margin: 0 auto; }
+  .desk-box {
+    display: flex; gap: 12px; align-items: flex-end;
+    border: 1px solid var(--line-strong);
+    background: rgba(240, 234, 216, 0.035);
+    padding: 12px 12px 12px 16px;
+    transition: border-color var(--dur-2) ease, box-shadow var(--dur-2) ease;
+  }
+  .desk-box:focus-within { border-color: var(--vermilion); box-shadow: 0 0 0 3px rgba(217, 58, 31, 0.12); }
+  .desk textarea {
+    flex: 1; resize: none; background: none; border: 0; outline: none;
+    font-size: 14.5px; line-height: 1.85; color: var(--room-ink);
+    min-height: 52px; max-height: 150px;
+  }
+  .desk textarea::placeholder { color: var(--ink-4); }
+  .desk-tools { display: flex; gap: 8px; align-items: center; }
+  .dbtn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 11px; font-size: 12.5px;
+    border: 1px solid var(--line); color: var(--ink-3);
+    transition: all var(--dur-1) ease;
+  }
+  .dbtn:hover { color: var(--room-ink); border-color: var(--line-strong); }
+  .dbtn.is-live { color: var(--vermilion); border-color: var(--verm-line); background: var(--verm-wash); animation: pulse 1.4s ease-in-out infinite; }
+  .send-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 20px; font-size: 13.5px; font-weight: 600;
+    background: var(--vermilion); color: #FFF6EE;
+    transition: all var(--dur-2) var(--ease);
+  }
+  .send-btn:hover { background: #EF4B2C; transform: translateY(-1px); }
+  .desk-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; }
+  .desk-meta span { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4); }
+
+  /* ── 结束 / 生成报告 ── */
+  .finish { display: flex; align-items: center; justify-content: center; flex: 1; padding: 40px; }
+  .finish-card {
+    max-width: 520px; width: 100%; text-align: center;
+    border: 1px solid var(--line-strong);
+    background: var(--sheet);
+    padding: clamp(30px, 5vw, 52px);
+    position: relative;
+  }
+  .finish-card .stamp { margin: 0 auto 22px; }
+  .finish-card h2 { font-size: 28px; margin-bottom: 12px; }
+  .finish-card .stats { display: flex; justify-content: center; gap: 34px; margin: 26px 0 30px; padding: 20px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .finish-card .stats .n { font-family: var(--f-mono); font-weight: 700; font-size: 26px; }
+  .finish-card .stats .l { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+
+  .gen-card { max-width: 520px; width: 100%; text-align: center; border: 1px solid var(--line-strong); background: var(--sheet); padding: clamp(30px, 5vw, 52px); }
+  .gen-card h2 { font-size: 24px; margin: 18px 0 10px; }
+  .gen-card p { color: var(--ink-3); font-size: 13.5px; }
+  .gen-log { margin-top: 24px; text-align: left; font-family: var(--f-mono); font-size: 11.5px; line-height: 2.1; color: var(--ink-4); }
+  .gen-log b { color: var(--vermilion); font-weight: 500; }
+
+  @media (max-width: 1080px) { .console { display: none; } }
+  @media (max-width: 720px) {
+    .room-top {
+      grid-template-columns: 1fr auto;
+      grid-template-areas: "left right" "prog prog";
+      row-gap: 12px;
+    }
+    .room-left { grid-area: left; }
+    .room-right { grid-area: right; }
+    .room-progress { grid-area: prog; min-width: 0; width: 100%; }
+    .demo-switch { display: none; }
+    .transcript { padding: 20px 18px 30px; }
+    .msg-ai .msg-text { font-size: 16px; }
+    .desk-box { flex-wrap: wrap; }
+    .desk textarea { min-height: 44px; width: 100%; flex: 1 1 100%; }
+    .desk-tools { width: 100%; justify-content: flex-end; }
+  }
+</style>
+</head>
+<body>
+<div class="room">
+
+  <!-- ══ 顶栏 ══ -->
+  <header class="room-top">
+    <div class="room-left">
+      <a class="room-exit" href="index.html"><span data-ic="arrowLeft"></span>退出</a>
+      <div class="room-role">
+        大模型应用开发工程师
+        <small>Mock session · Intermediate</small>
+      </div>
+    </div>
+
+    <div class="room-progress">
+      <span class="label">第 <b>3</b> / 8 题 · In progress</span>
+      <div class="ticks-line">
+        <i class="done"></i><i class="done"></i><i class="now"></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+    </div>
+
+    <div class="room-right">
+      <div class="demo-switch" data-state-group>
+        <span class="lb">预览</span>
+        <button data-state="live" class="is-on">作答中</button>
+        <button data-state="gen">生成报告</button>
+        <button data-state="done">已完成</button>
+      </div>
+      <button class="tts-btn is-on" id="ttsBtn"><span data-ic="volume"></span>语音</button>
+      <span class="timer" id="timer">14:26</span>
+    </div>
+  </header>
+
+  <!-- ══ 作答中 ══ -->
+  <div class="room-body" data-state-view="live">
+    <main class="transcript" id="transcript">
+      <div class="transcript-inner">
+
+        <div class="msg msg-status"><span>— 面试开始 · 14:02 —</span></div>
+
+        <article class="msg msg-ai">
+          <div class="msg-head">
+            <span class="msg-who">面试官</span><span class="msg-time">14:02</span>
+          </div>
+          <div class="msg-text">你好，我是本场面试官。我们会围绕大模型应用开发聊 8 个问题，回答不必完美，把思路讲清楚就好。先用一分钟做个自我介绍吧。</div>
+        </article>
+
+        <article class="msg msg-user">
+          <div class="msg-head">
+            <span class="msg-who">我</span><span class="msg-time">14:03</span>
+          </div>
+          <div class="msg-text">我主要做 RAG 方向的落地，做过一个基于 LangGraph 的模拟面试系统：题库用 BM25 加向量双路召回、RRF 融合排序，会话侧用人在回路中断来等待用户作答，报告会按四个维度打分并给出学习建议。</div>
+        </article>
+
+        <article class="msg msg-comment">
+          <div class="msg-head"><span class="msg-who" style="color:var(--ink-3)">面试官 · 反馈</span></div>
+          <div class="msg-text">好，项目里已经有比较完整的链路。那我们顺着 RAG 往下聊，看看你对检索细节的掌握程度。</div>
+        </article>
+
+        <article class="msg msg-ai">
+          <div class="msg-head">
+            <span class="msg-who">面试官</span><span class="msg-time">14:05</span>
+            <span class="msg-qid">Q2 · 检索链路</span>
+          </div>
+          <div class="msg-text">请说说你的 RAG 项目里，从文档到召回的完整链路是怎样的？为什么要引入重排，它解决了什么问题？</div>
+        </article>
+
+        <article class="msg msg-hint">
+          <div class="msg-head"><span class="msg-who" style="color:var(--ink-3)">提示</span></div>
+          <div class="hint-card">
+            <span data-ic="bulb"></span>
+            <div class="txt"><b>HINT 1/2</b><br />可以从「分块 → 双路召回 → 融合 → 重排 → 生成」五段来组织，重点说清重排前后的排序差异。</div>
+          </div>
+        </article>
+
+        <article class="msg msg-user">
+          <div class="msg-head"><span class="msg-who">我</span><span class="msg-time">14:07</span></div>
+          <div class="msg-text">文档先按语义边界切块，长文走父文档策略：子块建索引、父块作为返回单元。召回时 BM25 负责关键词命中，向量负责语义相近，两路各取 Top20 后用 RRF 融合。重排是把候选交给交叉编码器精排，因为双塔向量召回的相似度是粗粒度的，重排后 Top3 的命中率明显更稳。</div>
+        </article>
+
+        <article class="msg msg-comment">
+          <div class="msg-head"><span class="msg-who" style="color:var(--ink-3)">面试官 · 反馈</span></div>
+          <div class="msg-text">父文档策略这一点提得不错。不过你把重排的价值说得比较笼统，稍后我们回到这个问题上再深挖。</div>
+        </article>
+
+        <article class="msg msg-ai" id="liveMsg">
+          <div class="msg-head">
+            <span class="msg-who">面试官</span><span class="msg-time">14:09</span>
+            <span class="msg-qid">Q3 · 评估与幻觉</span>
+          </div>
+          <div class="msg-text"><span id="typer"></span><span class="caret"></span></div>
+        </article>
+
+        <div class="msg msg-status" id="thinkingRow" hidden><span class="thinking"><i></i><i></i><i></i></span></div>
+      </div>
+    </main>
+
+    <!-- 右侧控制台 -->
+    <aside class="console">
+      <div class="panel">
+        <div class="panel-head">面试信息 <span data-ic="target"></span></div>
+        <div class="panel-body">
+          <div class="kv"><span class="k">岗位</span><span class="v">大模型应用</span></div>
+          <div class="kv"><span class="k">题量</span><span class="v">8 题</span></div>
+          <div class="kv"><span class="k">已答</span><span class="v">2 题</span></div>
+          <div class="kv"><span class="k">用时</span><span class="v" id="timer2">14:26</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">题目状态 <span data-ic="layers"></span></div>
+        <div class="panel-body">
+          <ul class="q-list">
+            <li class="done"><span class="qn">01</span><span>自我介绍</span><span class="state">已评分</span></li>
+            <li class="done"><span class="qn">02</span><span>检索链路</span><span class="state">已评分</span></li>
+            <li class="now"><span class="qn">03</span><span>评估与幻觉</span><span class="state">作答中</span></li>
+            <li><span class="qn">04</span><span>Agent 工具调用</span><span class="state">待出题</span></li>
+            <li><span class="qn">05</span><span>Memory 设计</span><span class="state">待出题</span></li>
+            <li><span class="qn">06</span><span>微调数据构造</span><span class="state">待出题</span></li>
+            <li><span class="qn">07</span><span>部署与性能</span><span class="state">待出题</span></li>
+            <li><span class="qn">08</span><span>项目复盘</span><span class="state">待出题</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">面试记录 <button class="del" style="opacity:1" title="刷新"><span data-ic="refresh"></span></button></div>
+        <div class="panel-body" style="padding-top:6px">
+          <div class="rec-item">
+            <div style="min-width:0">
+              <div class="t">大模型应用开发工程师</div>
+              <div class="d">2026-10-04 · 8 题</div>
+            </div>
+            <button class="del" title="删除"><span data-ic="trash"></span></button>
+          </div>
+          <div class="rec-item">
+            <div style="min-width:0">
+              <div class="t">RAG 算法工程师</div>
+              <div class="d">2026-10-02 · 5 题</div>
+            </div>
+            <button class="del" title="删除"><span data-ic="trash"></span></button>
+          </div>
+          <div class="rec-item">
+            <div style="min-width:0">
+              <div class="t">AI Agent 工程师</div>
+              <div class="d">2026-09-28 · 10 题</div>
+            </div>
+            <button class="del" title="删除"><span data-ic="trash"></span></button>
+          </div>
+        </div>
+      </div>
+
+      <button class="end-btn" id="endBtn">提前结束面试</button>
+    </aside>
+  </div>
+
+  <!-- ══ 生成报告中 ══ -->
+  <div class="room-body" data-state-view="gen" hidden>
+    <div class="finish">
+      <div class="gen-card">
+        <div class="stamp stamp-sm" style="--sz:66px;font-size:15px">归档中</div>
+        <h2>正在生成面试报告</h2>
+        <p>汇总逐题评分、四维雷达与学习建议，通常需要 10–20 秒</p>
+        <div class="progress" style="margin-top:24px"><div class="progress-fill" style="width:64%"></div></div>
+        <div class="gen-log">
+          <div>› 汇总 8 道题的评分记录 …… <b>完成</b></div>
+          <div>› 计算四维雷达与分类得分 …… <b>完成</b></div>
+          <div>› 生成好答案 / 差答案对比 …… <b>进行中</b></div>
+          <div>› 写入报告档案 …… 等待</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 面试已完成 ══ -->
+  <div class="room-body" data-state-view="done" hidden>
+    <div class="finish">
+      <div class="finish-card">
+        <div class="stamp stamp-lg">已完成</div>
+        <h2>面试已完成</h2>
+        <p style="color:var(--ink-3); font-size:14px">本场共 8 题，你的作答记录已全部留档</p>
+        <div class="stats">
+          <div><div class="n">8</div><div class="l">回答题数</div></div>
+          <div><div class="n">13:41</div><div class="l">用时</div></div>
+          <div><div class="n">72%</div><div class="l">完成度</div></div>
+        </div>
+        <a class="btn btn-lg" href="summary.html" style="--btn-bg:var(--vermilion); border-color:var(--vermilion)">生成面试报告<span class="ar" data-ic="arrowRight"></span></a>
+        <p class="mono" style="margin-top:18px">或稍后在「面试记录」中随时生成</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 作答台 ══ -->
+  <footer class="desk" data-state-view="live">
+    <div class="desk-inner">
+      <div class="desk-box">
+        <textarea id="answer" rows="1" placeholder="输入你的回答，Enter 发送 / Shift + Enter 换行…"></textarea>
+        <div class="desk-tools">
+          <button class="dbtn" id="micBtn" title="语音输入"><span data-ic="mic"></span></button>
+          <button class="dbtn" id="hintBtn" title="获取提示（每题 2 次）"><span data-ic="bulb"></span>提示</button>
+          <button class="send-btn" id="sendBtn">发送<span data-ic="send"></span></button>
+        </div>
+      </div>
+      <div class="desk-meta">
+        <span>Enter 发送 · Shift+Enter 换行</span>
+        <span id="hintMeta">提示 1 / 2 已使用</span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script src="assets/js/app.js"></script>
+<script>
+  /* ── 打字机：模拟流式出题 ── */
+  const FULL_Q = '第三个问题聊聊评估。你们怎么判断 RAG 的回答有没有幻觉？如果要你设计一套评估方案，你会用哪些指标，怎么构造评测集？';
+  const typer = document.getElementById('typer');
+  let ti = 0;
+  function typeStep() {
+    if (ti <= FULL_Q.length) {
+      typer.textContent = FULL_Q.slice(0, ti++);
+      document.getElementById('transcript').scrollTop = 1e5;
+      setTimeout(typeStep, 42 + Math.random() * 46);
+    }
+  }
+  setTimeout(() => { document.getElementById('thinkingRow').hidden = false; }, 200);
+  setTimeout(() => { document.getElementById('thinkingRow').hidden = true; typeStep(); }, 1400);
+
+  /* ── 计时器 ── */
+  let sec = 14 * 60 + 26;
+  setInterval(() => {
+    sec++;
+    const t = String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0');
+    document.getElementById('timer').textContent = t;
+    document.getElementById('timer2').textContent = t;
+  }, 1000);
+
+  /* ── 输入台 ── */
+  const ta = document.getElementById('answer');
+  ta.addEventListener('input', () => {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 150) + 'px';
+  });
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  document.getElementById('sendBtn').addEventListener('click', send);
+  function send() {
+    const v = ta.value.trim();
+    if (!v) { toast('先写下你的回答', 'alert'); return; }
+    const box = document.querySelector('.transcript-inner');
+    const el = document.createElement('article');
+    el.className = 'msg msg-user';
+    el.innerHTML = `<div class="msg-head"><span class="msg-who">我</span><span class="msg-time">刚刚</span></div>
+      <div class="msg-text">${v.replace(/[<>]/g, '')}</div>`;
+    box.appendChild(el);
+    ta.value = ''; ta.style.height = 'auto';
+    document.getElementById('transcript').scrollTop = 1e5;
+    toast('回答已提交，面试官正在评分…');
+  }
+
+  /* ── 语音 / 提示 / 结束 ── */
+  const mic = document.getElementById('micBtn');
+  mic.addEventListener('click', () => {
+    mic.classList.toggle('is-live');
+    toast(mic.classList.contains('is-live') ? '正在聆听，请说话…' : '已停止语音输入', 'mic');
+  });
+  document.getElementById('hintBtn').addEventListener('click', () => toast('本题提示已用完（2/2）', 'bulb'));
+  document.getElementById('endBtn').addEventListener('click', () => {
+    document.querySelector('[data-state="done"]').click();
+    toast('面试已结束，可以生成报告了');
+  });
+  document.getElementById('ttsBtn').addEventListener('click', function () {
+    this.classList.toggle('is-on');
+  });
+</script>
+</body>
+</html>

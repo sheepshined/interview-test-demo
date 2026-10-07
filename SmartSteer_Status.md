@@ -1,6 +1,7 @@
 # SmartSteer — AI 模拟面试官 · 交接状态文档
 
 > **生成日期**: 2026-08-27 (v0.10, 知识库 AI 对话: 会话持久化 + RAG 上下文修复 + 面试记录删除 + 开场白优化)
+> **最新更新**: 2026-09-19 (v1.0, 知识库检索改为父文档检索 Parent Document Retrieval: 短文整篇/长文子块索引+父块返回, 详见 §13)
 > **适用范围**: `E:\hiagent\DEMO3\TOtal`（当前主线工作区）
 > **用途**: 在新窗口继续开发的交接文档。本文件只做"现状盘点"。
 > **配套文档**: [README.md](README.md)、[START_GUIDE.md](START_GUIDE.md)、[SmartSteer_Status-v-0.1-v-.md](SmartSteer_Status-v-0.1-v-.md)（v0.1 交接，历史参考）、[PROJECT_EVALUATION_AND_OPTIMIZATION.md](PROJECT_EVALUATION_AND_OPTIMIZATION.md)（完成度评估，2026-08-09）
@@ -120,6 +121,16 @@ Obsidian 式个人知识库 + 全局侧边栏布局（§9 详表）：
 
 ---
 
+### 1.9 父文档检索（v1.0，2026-09-19 本轮核心）
+
+知识库检索从"整篇一条向量（只嵌前 800 字）"升级为 **父文档检索**：
+- 短文（≤1200字）整篇 1 父块 1 子块（嵌入文本与旧模式逐字对齐，零退化）；
+- 长文按"行→标点句→硬切"切父块（~1200字）→子块（350字+70字重叠），只索引子块；检索两层聚合（(笔记×父块)取最高 → 笔记聚合）后返回命中父块，每笔记最多 4 个父块；
+- 新 Chroma 集合 `kb_parent_children`（目录 kb_parent_chroma）+ SQLite 新表 `parent_blocks`；旧模块 kb_vectors.py 已删除；`rebuild` 同时重建索引与语义边；
+- 实测（60 探针）：短文 Hit@5 94.7%→**100%**，长文 90.9%→**97.7%**（MRR 70.6%→87.3%），父块完整性 100%；75 项 pytest 全绿。
+
+---
+
 ## 2. 当前代码结构
 
 ```text
@@ -135,7 +146,7 @@ E:\hiagent\DEMO3\                  ← 顶层（旧根仓库，含 _archive 归�
     │   ├── knowledge.py           个人知识库：notes 表 + [[链接]]解析 + 图谱/反链构建 + 报告入库 (v0.7) + 表迁移/文件路径迁移 (v0.9) + chat 会话/消息持久化 (v0.10)
     │   ├── kb_extract.py          文件原文提取：md/txt/pptx/docx/pdf + 扫描件千问视觉转写 (v0.8)
     │   ├── kb_llm.py              LLM 结构化/AI 分类/AI 整理（STRONG 模型, 失败降级）(v0.8)
-    │   ├── kb_vectors.py          知识库向量库：kb_notes 集合 + 语义检索 + sem_links 重建 (v0.8)
+    │   ├── kb_parent.py        知识库父文档检索：kb_parent_children 集合 + parent_blocks 表 + sem_links 重建 (v1.0)
     │   ├── main.py                题库 build/rebuild 入口
     │   ├── config.py              全局配置（路径/检索/模型/角色/难度/评分维度/MEMORY_*/认证/知识库）
     │   ├── common.py              跨模块公共工具（岗位匹配/技能提取/JSON 容错/难度标签）
@@ -161,7 +172,7 @@ E:\hiagent\DEMO3\                  ← 顶层（旧根仓库，含 _archive 归�
     │   ├── data/                  9 岗位题库 .md（133 题，`### Q/A/S` + `<!-- id|category|difficulty -->`，v0.5 场景题扩展）
     │   ├── reports/               生成的报告（.md + .json 雷达对）
     │   ├── kb_files/              上传原始文件静态目录（v0.9, gitignored, /kb_files 免认证直访）
-    │   ├── kb_chroma/             知识库向量集合 kb_notes（v0.8, 与题库隔离）
+    │   ├── kb_parent_chroma/    父文档子块集合 kb_parent_children（v1.0, 与题库隔离; 旧 kb_chroma 已停用）
     │   ├── tests/                 见 §2.1
     │   ├── requirements.txt / requirements-dev.txt
     │   └── chroma_db/  uploads/   （.gitignore，运行时生成）
@@ -767,4 +778,55 @@ CREATE TABLE kb_chat_messages (    -- 消息 (role: user/assistant)
 
 ---
 
-*本文件为交接文档，不替代 README/START_GUIDE；内容基于 2026-08-27 工作区代码审阅与验证。*
+## 13. v1.0 变更记录 (2026-09-19, 父文档检索模式替换)
+
+### 13.1 背景：旧模式对长文的两个写死缺陷
+
+旧 kb_vectors 的"整篇一条向量"：嵌入文本 = 标题 + 分类 + 正文**前 800 字**。
+- **后段内容召不回**：答案在第 3000 字时嵌入文本里没有它的任何信息（Recall 问题）；
+- **语义稀释**：多主题长文一条向量等于多个主题的几何平均，离每个主题的查询都远，"本该搜到却差一口气"；
+- 喂 LLM 的全文另截 4000 字，后段同样不可见。
+
+### 13.2 方案：父文档检索（Parent Document Retrieval）
+
+| 项 | 内容 |
+|---|---|
+| 短文（≤LONG_DOC_THRESHOLD=1200字） | 整篇 = 1 父块 + 1 子块；子块嵌入文本与旧模式逐字对齐（标题+分类+正文前800字），行为零退化 |
+| 长文（>1200字） | 父块 ~1200 字（切分层级：**行 → 标点句 → 字符硬切**，边界不切断句子）；每个父块切子块 ~350 字（70 字重叠）；**只索引子块** |
+| 检索聚合 | 候选 60 子块 → ① `(笔记×父块)` 去重取最高分（每个父块公平投票）→ ② 笔记聚合：笔记分=最高父块分，返回该笔记全部命中父块（每笔记最多 4 个，控上下文） |
+| 增量同步 | 笔记增删改 → `sync_note`（删旧父块/子块重建）/ `remove_note`；内部吞异常，失败只告警不阻断主流程 |
+| 语义边 | `rebuild()` 同时重建父文档索引与 sem_links（笔记级嵌入两两余弦，阈值 0.66 + kNN top3） |
+
+**存储布局**：
+- Chroma 集合 `kb_parent_children`，目录 `kb_parent_chroma/`（环境变量 `KB_PARENT_CHROMA_PATH` 可覆盖，测试隔离用）；
+- knowledge.db 新表 `parent_blocks`（父块文本，按 username+parent_id 主键）；
+- 旧集合 kb_notes（kb_chroma）停用但未删数据，留作回滚兜底。
+
+### 13.3 改动面
+
+- 新增 `kb_parent.py`；删除 `kb_vectors.py`；
+- `server.py`：13 处引用切换（笔记增删改同步、上传/网址入库、/search、/qa、/rebuild、auto-link、from-report 覆盖检测）；
+- `kb_llm.py`：`is_sparse` 导入切换；
+- `tests/conftest.py`：新增 `KB_PARENT_CHROMA_PATH` 隔离；
+- `tests/test_kb_v08.py`：伪嵌入夹具隔离独立集合（防 16 维伪向量与真实 768 维共用集合）；
+- 新增 `tests/parent_retrieval_check.py`：真实数据验证脚本。
+
+### 13.4 验证
+
+| 检查 | 结果 |
+|---|---|
+| pytest（.venv） | **75 passed**（含 3 个 async 面试图测试） |
+| 端到端冒烟 real_smoke_kb.py | **7/7 通过**（服务运行态，两轮验证） |
+| 60 条探针（admin 21 篇真实笔记） | 短文 Hit@5 94.7%→**100%**（MRR→95.3%）；长文 90.9%→**97.7%**（MRR 70.6%→87.3%） |
+| 父块完整性 | 探针句 **100%** 包含在返回父块中 |
+
+过程中修复两个真实问题：① 切分对无标点大段 Markdown 硬切导致句子腰斩（改为行优先层级）；② 笔记只被靠前章节"代表"（改为两层聚合返回全部命中父块）。
+
+### 13.5 环境备忘
+
+- pytest-asyncio 只在项目 `.venv` 中安装；Windows Store Python 跑 async 用例会报"async def functions are not natively supported"——测试与启动均须用 `.venv\Scripts\python.exe`；
+- `.pytest_tmp` / `.pytest_cache` 两个历史目录当前用户无 ACL 权限（旧进程遗留），默认 pytest 跑不通时用 `--basetemp=<可写目录>` 或 `-o "addopts=--basetemp=<可写目录>"` 绕过。
+
+---
+
+*本文件为交接文档，不替代 README/START_GUIDE；§1–12 基于 2026-08-27 工作区审阅，§13 基于 2026-09-19 父文档检索改造的代码与实测。*

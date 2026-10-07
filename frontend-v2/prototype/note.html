@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>笔记编辑 · AI 模拟面试官</title>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="assets/css/tokens.css">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/components.css">
+<style>
+  .editor-layout { display: grid; grid-template-columns: 1.6fr 1fr; gap: 26px; align-items: start; }
+
+  /* ── 编辑器 ── */
+  .editor { border: 1px solid var(--line-strong); background: var(--sheet); }
+  .editor-head { padding: 24px 30px 0; }
+  .type-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .title-input {
+    width: 100%; border: 0; background: none; outline: none;
+    font-family: var(--f-display); font-weight: 900; font-size: clamp(24px, 2.4vw, 32px);
+    line-height: 1.35; color: var(--ink);
+  }
+  .title-input::placeholder { color: var(--ink-4); }
+  .editor-meta { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 16px 0 0; }
+  .mini-field { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-3); }
+  .mini-field input {
+    border: 0; border-bottom: 1px dashed var(--line-strong); background: none; outline: none;
+    font-size: 13px; padding: 3px 2px; min-width: 90px; color: var(--ink);
+  }
+  .mini-field input:focus { border-bottom-color: var(--vermilion); }
+
+  .editor-toolbar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 16px 30px; margin-top: 20px;
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    background: var(--sheet-2);
+  }
+  .tool-btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 8px 13px; font-size: 12.5px;
+    border: 1px solid var(--line); background: var(--sheet); color: var(--ink-2);
+    transition: all var(--dur-1) ease;
+  }
+  .tool-btn:hover { border-color: var(--ink); color: var(--ink); transform: translateY(-1px); }
+  .tool-btn .ic { color: var(--vermilion); }
+  .seg { display: flex; margin-left: auto; border: 1px solid var(--line); }
+  .seg button { padding: 8px 16px; font-size: 12.5px; color: var(--ink-3); transition: all var(--dur-1) ease; }
+  .seg button.is-on { background: var(--ink); color: var(--paper); }
+
+  /* 稿纸：行线与行高严格对齐，左侧朱砂边线（作文稿纸意象） */
+  .paper-area { position: relative; }
+  .paper-area textarea {
+    width: 100%; min-height: 540px; border: 0; outline: none; resize: vertical;
+    padding: 27px 30px 34px 76px; background: transparent;
+    font-size: 15px; line-height: 30px; color: var(--ink);
+    background-image:
+      linear-gradient(90deg, transparent 0 58px, var(--verm-line) 58px, var(--verm-line) 59px, transparent 59px),
+      repeating-linear-gradient(transparent 0, transparent 29px, var(--line-soft) 29px, var(--line-soft) 30px);
+    background-position: 0 0, 0 27px;
+  }
+
+  /* 预览（渲染后的 Markdown） */
+  .preview { padding: 26px 30px 34px; display: none; }
+  .preview.is-on { display: block; }
+  .paper-area textarea.is-off { display: none; }
+  .preview h2 { font-size: 20px; margin: 26px 0 10px; }
+  .preview h2:first-child { margin-top: 0; }
+  .preview h3 { font-size: 16px; margin: 20px 0 8px; color: var(--ink-2); }
+  .preview p { font-size: 14.5px; line-height: 2.05; color: var(--ink-2); margin-bottom: 12px; }
+  .preview li { font-size: 14.5px; line-height: 2; color: var(--ink-2); padding-left: 18px; position: relative; }
+  .preview li::before { content: '·'; position: absolute; left: 5px; color: var(--vermilion); }
+  .preview blockquote {
+    margin: 16px 0; padding: 12px 18px;
+    border-left: 2px solid var(--verm-line); background: var(--verm-wash);
+    font-size: 13.5px; color: var(--ink-2); font-style: italic;
+  }
+  .preview code {
+    font-family: var(--f-mono); font-size: 12.5px;
+    background: var(--sheet-2); border: 1px solid var(--line); padding: 1px 6px;
+  }
+  .wikilink {
+    color: var(--indigo-ink); font-weight: 500;
+    border-bottom: 1px dashed rgba(35,64,92,.5); cursor: pointer;
+    transition: all var(--dur-1) ease;
+  }
+  .wikilink:hover { color: var(--vermilion); border-color: var(--vermilion); }
+
+  /* ── 右栏 ── */
+  .side-stack { display: flex; flex-direction: column; gap: 20px; }
+  .panel { border: 1px solid var(--line); background: var(--sheet); }
+  .panel-head {
+    padding: 14px 18px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-3);
+  }
+  .panel-body { padding: 14px 18px; }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; font-size: 13px; border-bottom: 1px dashed var(--line); }
+  .kv:last-child { border-bottom: 0; }
+  .kv .k { color: var(--ink-4); font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; padding-top: 2px; }
+  .kv .v { color: var(--ink-2); text-align: right; }
+  .kv .v.num { font-family: var(--f-mono); font-weight: 700; color: var(--ink); }
+
+  .backlink { display: block; padding: 11px 0; border-bottom: 1px dashed var(--line); }
+  .backlink:last-child { border-bottom: 0; }
+  .backlink .t { font-size: 13.5px; font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 7px; }
+  .backlink .t .ic { color: var(--indigo-ink); }
+  .backlink .ctx { font-size: 12.5px; color: var(--ink-3); line-height: 1.8; margin-top: 5px; }
+  .backlink .ctx em { font-style: normal; background: var(--verm-wash); color: var(--ink); padding: 0 2px; }
+
+  .related { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px dashed var(--line); }
+  .related:last-child { border-bottom: 0; }
+  .related .t { flex: 1; min-width: 0; font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .related .sim { font-family: var(--f-mono); font-size: 11px; font-weight: 700; color: var(--pine); }
+  .related .insert {
+    font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ink-4); border: 1px solid var(--line); padding: 3px 8px; opacity: 0;
+    transition: all var(--dur-1) ease;
+  }
+  .related:hover .insert { opacity: 1; }
+  .related .insert:hover { color: var(--vermilion); border-color: var(--verm-line); }
+
+  @media (max-width: 1080px) { .editor-layout { grid-template-columns: 1fr; } }
+  @media (max-width: 620px) {
+    .editor-head { padding: 20px 20px 0; }
+    .editor-toolbar { padding: 14px 20px; }
+    .paper-area textarea, .preview { padding: 20px 20px 28px; }
+    .type-row { flex-wrap: wrap; gap: 8px; }
+    .type-row .mono { display: none; }
+    .editor-meta { gap: 8px 16px; }
+  }
+</style>
+</head>
+<body data-shell="app" data-page="workspace">
+
+<div class="shell">
+  <aside class="rail"></aside>
+  <div class="rail-scrim"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:14px">
+        <button class="icon-btn rail-toggle" aria-label="菜单"><span data-ic="menu"></span></button>
+        <div class="crumb"><span>卷·05</span><span class="sep">/</span><b>笔记编辑</b></div>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" title="删除笔记" onclick="toast('演示：删除后返回笔记列表','trash')"><span data-ic="trash"></span></button>
+        <button class="btn btn-sm" onclick="toast('已保存 · 已同步向量索引')"><span data-ic="save"></span>保存</button>
+      </div>
+    </div>
+
+    <div class="page-body">
+      <div class="editor-layout">
+        <!-- ══ 编辑器 ══ -->
+        <div class="editor rv">
+          <div class="editor-head">
+            <div class="type-row">
+              <span class="badge line"><span data-ic="pen"></span>手写笔记</span>
+              <span class="mono">NOTE № 07 · 创建于 09-27</span>
+            </div>
+            <input class="title-input" value="RAG 评估指标与评测集" />
+            <div class="editor-meta">
+              <span class="mini-field"><span data-ic="folder"></span>分类 <input value="大模型" /></span>
+              <span class="mini-field"><span data-ic="hash"></span>标签 <input value="评估, RAG, 评测集" /></span>
+            </div>
+          </div>
+
+          <div class="editor-toolbar">
+            <button class="tool-btn" onclick="toast('AI 整理排版完成：已统一标题层级与列表格式','sparkle')"><span data-ic="sparkle"></span>整理排版</button>
+            <button class="tool-btn" onclick="toast('已自动归类到「大模型」','folder')"><span data-ic="folder"></span>自动分类</button>
+            <button class="tool-btn" onclick="toast('已追加 3 条 [[双链]] 到相关笔记','link')"><span data-ic="link"></span>智能关联</button>
+            <div class="seg">
+              <button class="is-on" id="tabEdit">编辑</button>
+              <button id="tabPreview">预览</button>
+            </div>
+          </div>
+
+          <div class="paper-area">
+            <textarea spellcheck="false">## 为什么需要评估
+RAG 的失败可能来自两端：检索没召回正确段落，或生成阶段脱离上下文。评估必须把两类问题分开，否则无法定位优化点。
+
+## 三类核心指标
+- Faithfulness：回答的每个断言是否都能在上下文中找到支撑
+- Answer Relevancy：回答是否切题，而非答非所问
+- Context Recall：必要信息是否被检索回来
+
+## 评测集怎么构造
+1. 从真实使用中收集 50~100 条 query
+2. 为每条 query 标注标准答案与支撑段落
+3. 用 LLM-as-Judge 批量打分，再人工抽检 20% 校准
+
+> 经验：小规模高质量的评测集，比大规模自动生成更有指导意义。
+
+相关：[[向量检索]]、[[BM25 + 向量混合检索]]、[[Transformer 架构笔记]]</textarea>
+
+            <div class="preview" id="preview">
+              <h2>为什么需要评估</h2>
+              <p>RAG 的失败可能来自两端：检索没召回正确段落，或生成阶段脱离上下文。评估必须把两类问题分开，否则无法定位优化点。</p>
+              <h2>三类核心指标</h2>
+              <ul>
+                <li>Faithfulness：回答的每个断言是否都能在上下文中找到支撑</li>
+                <li>Answer Relevancy：回答是否切题，而非答非所问</li>
+                <li>Context Recall：必要信息是否被检索回来</li>
+              </ul>
+              <h2>评测集怎么构造</h2>
+              <p>1. 从真实使用中收集 50~100 条 query<br />2. 为每条 query 标注标准答案与支撑段落<br />3. 用 LLM-as-Judge 批量打分，再人工抽检 20% 校准</p>
+              <blockquote>经验：小规模高质量的评测集，比大规模自动生成更有指导意义。</blockquote>
+              <p>相关：<span class="wikilink" onclick="toast('跳转到「向量检索」笔记')">向量检索</span>、<span class="wikilink" onclick="toast('跳转到「BM25 + 向量混合检索」笔记')">BM25 + 向量混合检索</span>、<span class="wikilink" onclick="toast('跳转到「Transformer 架构笔记」笔记')">Transformer 架构笔记</span></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ 右栏 ══ -->
+        <aside class="side-stack">
+          <div class="panel rv" data-d="0.06s">
+            <div class="panel-head">元信息 <span data-ic="target"></span></div>
+            <div class="panel-body" style="padding-top:6px">
+              <div class="kv"><span class="k">类型</span><span class="v">手写笔记</span></div>
+              <div class="kv"><span class="k">创建</span><span class="v">2026-09-27</span></div>
+              <div class="kv"><span class="k">更新</span><span class="v">2026-10-04 14:22</span></div>
+              <div class="kv"><span class="k">字数</span><span class="v num">362</span></div>
+              <div class="kv"><span class="k">被引用</span><span class="v num">3</span></div>
+              <div class="kv"><span class="k">索引状态</span><span class="v"><span class="badge pine"><span class="dot pine"></span>已同步</span></span></div>
+            </div>
+          </div>
+
+          <div class="panel rv" data-d="0.12s">
+            <div class="panel-head">反向链接 · 3 <span data-ic="link"></span></div>
+            <div class="panel-body" style="padding-top:6px">
+              <a class="backlink" href="note.html">
+                <span class="t"><span data-ic="pen"></span>部署清单：并发、缓存与成本</span>
+                <span class="ctx">…上线前先补齐 [[RAG 评估指标与评测集]]，否则无法判断优化是否有效…</span>
+              </a>
+              <a class="backlink" href="note.html">
+                <span class="t"><span data-ic="file"></span>Transformer 架构笔记</span>
+                <span class="ctx">…评测指标与 [[RAG 评估指标与评测集]] 中的口径保持一致…</span>
+              </a>
+              <a class="backlink" href="note.html">
+                <span class="t"><span data-ic="pen"></span>BM25 + 向量混合检索</span>
+                <span class="ctx">…上下文召回率（见 [[RAG 评估指标与评测集]]）是判断检索改动的第一指标…</span>
+              </a>
+            </div>
+          </div>
+
+          <div class="panel rv" data-d="0.18s">
+            <div class="panel-head">相关笔记 · 语义 <span data-ic="network"></span></div>
+            <div class="panel-body" style="padding-top:6px">
+              <div class="related">
+                <span class="t">BM25 + 向量混合检索</span><span class="sim">82%</span>
+                <button class="insert" onclick="toast('已插入 [[BM25 + 向量混合检索]]')">插入</button>
+              </div>
+              <div class="related">
+                <span class="t">向量检索</span><span class="sim">77%</span>
+                <button class="insert" onclick="toast('已插入 [[向量检索]]')">插入</button>
+              </div>
+              <div class="related">
+                <span class="t">反幻觉数据契约</span><span class="sim">71%</span>
+                <button class="insert" onclick="toast('已插入 [[反幻觉数据契约]]')">插入</button>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/app.js"></script>
+<script>
+  /* 编辑 / 预览切换 */
+  const tabEdit = document.getElementById('tabEdit');
+  const tabPreview = document.getElementById('tabPreview');
+  const ta = document.querySelector('.paper-area textarea');
+  const preview = document.getElementById('preview');
+  function setMode(edit) {
+    tabEdit.classList.toggle('is-on', edit);
+    tabPreview.classList.toggle('is-on', !edit);
+    ta.classList.toggle('is-off', !edit);
+    preview.classList.toggle('is-on', !edit);
+  }
+  tabEdit.addEventListener('click', () => setMode(true));
+  tabPreview.addEventListener('click', () => setMode(false));
+
+  /* 稿纸行高对齐：输入时保持滚动条正常 */
+  ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; });
+</script>
+</body>
+</html>

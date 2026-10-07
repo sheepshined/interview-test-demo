@@ -172,12 +172,12 @@ def answer_from_knowledge(question: str, contexts: List[Dict]) -> Dict:
 
     Args:
         question: 用户问题
-        contexts: kb_vectors.search() 返回的结果列表
+        contexts: kb_parent.search() 返回的结果列表
 
     Returns:
         {"answer": str, "sources": [{"title": str, "score": float, "note_id": int}], "sparse": bool}
     """
-    from kb_vectors import is_sparse
+    from kb_parent import is_sparse
 
     sparse = is_sparse(contexts)
 

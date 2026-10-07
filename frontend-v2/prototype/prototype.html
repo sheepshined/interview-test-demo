@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>原型总览 · AI 模拟面试官</title>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="assets/css/tokens.css">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/components.css">
+<style>
+  .proto-head { padding: clamp(40px, 7vw, 84px) 0 40px; border-bottom: 1px solid var(--line-strong); }
+  .proto-head h1 { font-size: clamp(34px, 5vw, 62px); margin: 20px 0 18px; }
+  .head-meta { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 30px; }
+  .head-meta .m .k { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-4); display: block; margin-bottom: 5px; }
+  .head-meta .m .v { font-size: 14px; color: var(--ink-2); }
+
+  /* 目录行 */
+  .toc { margin-top: 26px; border-top: 1px solid var(--line-strong); }
+  .toc-row {
+    position: relative;
+    display: grid; grid-template-columns: 68px 1.1fr 1.4fr 130px 40px;
+    gap: 20px; align-items: center;
+    padding: 22px 18px;
+    border-bottom: 1px solid var(--line);
+    overflow: hidden;
+    transition: padding-left var(--dur-2) var(--ease);
+    cursor: pointer;
+  }
+  .toc-row::before {
+    content: ''; position: absolute; inset: 0;
+    background: var(--ink);
+    transform: scaleY(0); transform-origin: bottom;
+    transition: transform var(--dur-2) var(--ease);
+    z-index: 0;
+  }
+  .toc-row:hover::before { transform: scaleY(1); }
+  .toc-row:hover { padding-left: 28px; }
+  .toc-row > * { position: relative; z-index: 1; }
+  .toc-row:hover .no, .toc-row:hover .name, .toc-row:hover .arrow { color: var(--room-ink); }
+  .toc-row:hover .desc { color: rgba(240,234,216,.66); }
+  .toc-row:hover .path { color: rgba(240,234,216,.5); border-color: rgba(240,234,216,.3); }
+  .toc-row .no { font-family: var(--f-mono); font-size: 12px; font-weight: 700; letter-spacing: 0.1em; color: var(--vermilion); }
+  .toc-row .name { font-family: var(--f-display); font-weight: 900; font-size: 21px; color: var(--ink); transition: color var(--dur-2) ease; }
+  .toc-row .name small { display: block; font-family: var(--f-mono); font-size: 10px; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-4); margin-top: 5px; }
+  .toc-row:hover .name small { color: rgba(240,234,216,.45); }
+  .toc-row .desc { font-size: 13.5px; color: var(--ink-3); line-height: 1.8; transition: color var(--dur-2) ease; }
+  .toc-row .path { font-family: var(--f-mono); font-size: 11px; color: var(--ink-4); border: 1px solid var(--line); padding: 4px 9px; text-align: center; transition: all var(--dur-2) ease; }
+  .toc-row .arrow { justify-self: end; color: var(--ink-4); transition: color var(--dur-2) ease, transform var(--dur-2) var(--ease); }
+  .toc-row:hover .arrow { transform: translateX(5px); }
+
+  /* 设计系统 */
+  .system { margin-top: clamp(46px, 6vw, 80px); }
+  .sys-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 24px; }
+  .sys-card { border: 1px solid var(--line); background: var(--sheet); padding: 22px; }
+  .sys-card h4 { font-family: var(--f-mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 16px; }
+  .swatches { display: flex; gap: 10px; }
+  .sw { flex: 1; height: 64px; border: 1px solid var(--line); position: relative; }
+  .sw span { position: absolute; left: 6px; bottom: 5px; font-family: var(--f-mono); font-size: 8.5px; color: rgba(255,255,255,.8); letter-spacing: 0.06em; }
+  .sw.on-light span { color: rgba(23,21,15,.6); }
+  .type-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .type-list li:last-child { border-bottom: 0; }
+  .type-list .sample { color: var(--ink); }
+  .type-list .spec { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); }
+  .checks li { display: flex; align-items: flex-start; gap: 9px; padding: 7px 0; font-size: 13px; color: var(--ink-2); }
+  .checks .ic { color: var(--pine); flex-shrink: 0; margin-top: 2px; }
+
+  .proto-foot { margin-top: clamp(46px, 6vw, 80px); padding: 30px 0 60px; border-top: 1px solid var(--line-strong); display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-4); }
+
+  @media (max-width: 980px) {
+    .toc-row { grid-template-columns: 46px 1fr 40px; }
+    .toc-row .desc, .toc-row .path { display: none; }
+    .sys-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 560px) { .sys-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-page="proto">
+
+<header class="pubnav" style="position:sticky; top:0; z-index:60; display:flex; align-items:center; justify-content:space-between; gap:22px; padding:16px var(--gutter); background:color-mix(in srgb, var(--paper) 86%, transparent); backdrop-filter:blur(12px); border-bottom:1px solid var(--line)">
+  <a class="brandmark" href="index.html">
+    <span class="seal">面</span>
+    <span>
+      <span class="name">AI 模拟面试官</span>
+      <span class="sub" style="display:block">Interview Studio</span>
+    </span>
+  </a>
+  <a class="btn btn-sm" href="index.html">进入首页<span class="ar" data-ic="arrowRight"></span></a>
+</header>
+
+<main class="wrap">
+  <section class="proto-head">
+    <span class="eyebrow">Prototype · 前端重构提案</span>
+    <h1>全部页面，一页看尽</h1>
+    <p class="lead">
+      这是「墨卷档案」视觉方向的完整前端原型：暖纸底、墨黑、朱砂单强调色，宋体大标题配等宽标注，
+      细线网格排版；面试间采用暗房专注模式。全部为静态页面，未接入后端功能，也未改动原 <span class="mono">frontend/</span> 目录。
+    </p>
+    <div class="head-meta">
+      <div class="m"><span class="k">Pages</span><span class="v">12 个页面 + 总览</span></div>
+      <div class="m"><span class="k">Stack</span><span class="v">静态 HTML / CSS / 原生 JS</span></div>
+      <div class="m"><span class="k">Backend</span><span class="v">未接入 · 演示数据</span></div>
+      <div class="m"><span class="k">Theme</span><span class="v">纸感亮色 + 暗房模式</span></div>
+    </div>
+  </section>
+
+  <!-- 目录 -->
+  <nav class="toc" data-stagger>
+    <a class="toc-row rv" href="login.html">
+      <span class="no">01</span>
+      <span class="name">登录 / 注册<small>Dossier Access</small></span>
+      <span class="desc">左侧墨底品牌宣言 + 旋转铭文章，右侧页签式表单，演示账号提示。</span>
+      <span class="path">login.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+    <a class="toc-row rv" href="index.html">
+      <span class="no">02</span>
+      <span class="name">首页<small>Landing</small></span>
+      <span class="desc">大标题逐行揭示，右侧四张「档案卡」叠放（评分卡 / 对话卡 / 图谱卡 / 印章），滚动字幕与深色知识库区。</span>
+      <span class="path">index.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+    <a class="toc-row rv" href="resume.html">
+      <span class="no">03</span>
+      <span class="name">简历匹配<small>Resume</small></span>
+      <span class="desc">拖拽上传区含解析进度日志动画，粘贴文本入口，解析结果技能标签与推荐岗位。</span>
+      <span class="path">resume.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+    <a class="toc-row rv" href="matching.html">
+      <span class="no">04</span>
+      <span class="name">岗位匹配<small>Matching</small></span>
+      <span class="desc">简历摘要条 + 岗位卡片网格，推荐卡带朱砂角标与匹配度进度条动画。</span>
+      <span class="path">matching.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+    <a class="toc-row rv" href="choose-job.html">
+      <span class="no">05</span>
+      <span class="name">选择岗位<small>Configuration</small></span>
+      <span class="desc">岗位单选卡、题量数字选择器联动右侧本场说明，含面试官人设与能力项清单。</span>
+      <span class="path">choose-job.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+    <a class="toc-row rv" href="interview.html">
+      <span class="no">06</span>
+      <span class="name">模拟面试间<small>Dark Room</small></span>
+      <span class="desc">暗房模式：编辑式对话流（面试官宋体提问 / 我的作答 / 反馈 / 提示便签）、顶部打字机流式出题、右侧控制台、底部作答台；右上角可切换「作答中 / 生成报告 / 已完成」三种状态。</span>
+      <span class="path">interview.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+    <a class="toc-row rv" href="summary.html">
+      <span class="no">07</span>
+      <span class="name">面试报告<small>Report</small></span>
+      <span class="desc">报告封面 + 巨型平均分与印章，自绘四维雷达、分类得分条、强弱项、学习建议一键入库与覆盖检测、好差答案对照、报告全文。</span>
+      <span class="path">summary.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+    <a class="toc-row rv" href="records.html">
+      <span class="no">08</span>
+      <span class="name">面试记录<small>Archive</small></span>
+      <span class="desc">档案清单 + 文档视图（逐题问答、评分徽记、追问标记），支持复制与删除悬停态。</span>
+      <span class="path">records.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+    <a class="toc-row rv" href="workspace.html">
+      <span class="no">09</span>
+      <span class="name">我的笔记<small>Library</small></span>
+      <span class="desc">搜索 / 分类 / 标签筛选，导入结果面板，笔记卡片含类型字形、双链计数与来源角标，添加网址弹窗。</span>
+      <span class="path">workspace.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+    <a class="toc-row rv" href="note.html">
+      <span class="no">10</span>
+      <span class="name">笔记编辑<small>Editor</small></span>
+      <span class="desc">稿纸式编辑器（编辑 / 预览切换），AI 整理 · 分类 · 关联三个动作，右栏含元信息、反向链接与语义相关笔记。</span>
+      <span class="path">note.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+    <a class="toc-row rv" href="graph.html">
+      <span class="no">11</span>
+      <span class="name">知识图谱<small>Graph</small></span>
+      <span class="desc">三簇图谱：节点按度数定大小、类型定颜色，实线双链与流动虚线语义边，悬停节点弹出详情卡，虚拟节点可创建。</span>
+      <span class="path">graph.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+    <a class="toc-row rv" href="chat.html">
+      <span class="no">12</span>
+      <span class="name">AI 对话<small>Grounded QA</small></span>
+      <span class="desc">会话列表 + 知识库问答：助答以档案摘录呈现，带编号引用角标与来源相似度条，低相关度提示导入。</span>
+      <span class="path">chat.html</span>
+      <span class="arrow" data-ic="arrowRight"></span>
+    </a>
+  </nav>
+
+  <!-- 设计系统速览 -->
+  <section class="system">
+    <div class="sec-head rv">
+      <span class="sec-index">DESIGN SYSTEM</span>
+      <h2 class="d2">设计系统速览</h2>
+      <p class="lead">四组令牌支撑全部页面：色彩、字体、形状与运动。</p>
+    </div>
+
+    <div class="sys-grid">
+      <div class="sys-card rv">
+        <h4>Color · 色彩</h4>
+        <div class="swatches">
+          <div class="sw on-light" style="background:#F4F1E8"><span>#F4F1E8</span></div>
+          <div class="sw" style="background:#17150F"><span>#17150F</span></div>
+          <div class="sw" style="background:#D93A1F"><span>#D93A1F</span></div>
+          <div class="sw" style="background:#23405C"><span>#23405C</span></div>
+        </div>
+        <p style="font-size:12.5px; color:var(--ink-3); line-height:1.8; margin-top:14px">
+          暖纸底 + 墨黑正文，朱砂为唯一强强调色（激活、评分、印章），黛蓝 / 松绿 / 赭石只用于数据与状态。
+        </p>
+      </div>
+
+      <div class="sys-card rv" data-d="0.06s">
+        <h4>Type · 字体</h4>
+        <ul class="type-list">
+          <li><span class="sample" style="font-family:var(--f-display); font-weight:900; font-size:19px">宋体大标题</span><span class="spec">Noto Serif SC 900</span></li>
+          <li><span class="sample" style="font-size:14px">正文与界面文字</span><span class="spec">Noto Sans SC 400</span></li>
+          <li><span class="sample" style="font-family:var(--f-mono); font-size:13px">LABEL 08:42</span><span class="spec">JetBrains Mono 500</span></li>
+          <li><span class="sample latin" style="font-size:17px">Interview Studio</span><span class="spec">Instrument Serif</span></li>
+        </ul>
+      </div>
+
+      <div class="sys-card rv" data-d="0.12s">
+        <h4>Shape & Motion · 形状与运动</h4>
+        <ul class="type-list">
+          <li><span class="sample">圆角</span><span class="spec">2–3px 锐利编辑感</span></li>
+          <li><span class="sample">细线</span><span class="spec">1px @ 14% 墨</span></li>
+          <li><span class="sample">阴影</span><span class="spec">纸页叠加，非发光</span></li>
+          <li><span class="sample">缓动</span><span class="spec">cubic-bezier(.22,1,.36,1)</span></li>
+          <li><span class="sample">入场</span><span class="spec">逐行揭示 + 错峰 70ms</span></li>
+        </ul>
+      </div>
+
+      <div class="sys-card rv" data-d="0.18s">
+        <h4>Self-check · 自检</h4>
+        <ul class="checks">
+          <li><span class="ic" data-ic="checkCircle"></span><span>排版：中英混排、数字等宽、层级 4 级</span></li>
+          <li><span class="ic" data-ic="checkCircle"></span><span>留白：章节间距 clamp 自适应</span></li>
+          <li><span class="ic" data-ic="checkCircle"></span><span>色彩：单强调色 + 3 个语义色</span></li>
+          <li><span class="ic" data-ic="checkCircle"></span><span>动效：滚动揭示 / 按钮擦除 / 印章入场</span></li>
+          <li><span class="ic" data-ic="checkCircle"></span><span>响应式：1440 / 1080 / 820 / 560 四档</span></li>
+          <li><span class="ic" data-ic="checkCircle"></span><span>可访问性：焦点环 / 减少动效 / 语义标签</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <div class="proto-foot">
+    <span>Static Prototype · 未接入后端 / 未修改原代码</span>
+    <span>目录：E:\hiagent\DEMO3\TOtal\frontend-v2</span>
+  </div>
+</main>
+
+<script src="assets/js/app.js"></script>
+</body>
+</html>

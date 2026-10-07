@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>面试报告 · AI 模拟面试官</title>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="assets/css/tokens.css">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/components.css">
+<style>
+  /* ── 报告封面 ── */
+  .cover {
+    position: relative;
+    border: 1px solid var(--line-strong);
+    background: var(--sheet);
+    padding: clamp(26px, 4vw, 46px);
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: clamp(24px, 4vw, 56px);
+    align-items: center;
+    overflow: hidden;
+  }
+  .cover::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(560px 260px at 100% 0%, var(--verm-wash), transparent 68%);
+  }
+  .cover-score { display: flex; align-items: flex-end; gap: 10px; position: relative; }
+  .cover-score .big { font-family: var(--f-mono); font-weight: 700; font-size: clamp(64px, 8vw, 108px); line-height: 0.86; letter-spacing: -0.05em; }
+  .cover-score .of { font-family: var(--f-mono); font-size: 15px; color: var(--ink-3); padding-bottom: 8px; }
+  .cover-score .cap { position: absolute; top: -22px; left: 2px; font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink-4); }
+  .cover-main { position: relative; }
+  .cover-main h1 { font-size: clamp(24px, 2.6vw, 34px); }
+  .cover-main .role { margin-top: 10px; font-size: 14.5px; color: var(--ink-2); }
+  .cover-kv { display: flex; gap: 26px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .cover-kv .k { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-4); display: block; margin-bottom: 4px; }
+  .cover-kv .v { font-family: var(--f-mono); font-weight: 700; font-size: 17px; }
+  .cover-stamp { position: relative; }
+
+  /* ── 指标格 ── */
+  .kpi { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-top: 0; background: var(--sheet-2); }
+  .kpi .cell { padding: 20px 24px; border-left: 1px solid var(--line); }
+  .kpi .cell:first-child { border-left: 0; }
+  .kpi .n { font-family: var(--f-mono); font-weight: 700; font-size: 26px; letter-spacing: -0.03em; }
+  .kpi .l { font-size: 12.5px; color: var(--ink-3); margin-top: 4px; }
+
+  /* ── 章节 ── */
+  .chapter { margin-top: clamp(34px, 5vw, 62px); }
+  .chapter-head {
+    display: flex; align-items: baseline; gap: 14px;
+    padding-bottom: 14px; margin-bottom: 22px;
+    border-bottom: 1px solid var(--line-strong);
+  }
+  .chapter-head .sec { font-family: var(--f-mono); font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: var(--vermilion); }
+  .chapter-head h2 { font-size: clamp(19px, 2vw, 24px); }
+  .chapter-head .hint { margin-left: auto; font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-4); }
+
+  .duo { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: clamp(26px, 4vw, 54px); align-items: start; }
+
+  /* 雷达大图 */
+  .radar-box { padding: 26px; text-align: center; }
+  .radar-box svg { width: 100%; max-width: 330px; margin: 0 auto; }
+  .radar-axis { font-family: var(--f-mono); font-size: 10.5px; fill: var(--ink-3); letter-spacing: 0.08em; }
+  .radar-val { font-family: var(--f-mono); font-size: 12px; font-weight: 700; fill: var(--ink); }
+
+  .dims { display: flex; flex-direction: column; }
+  .dim-line { padding: 18px 4px; border-bottom: 1px solid var(--line); }
+  .dim-line:first-child { border-top: 1px solid var(--line); }
+  .dim-line .top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .dim-line .name { font-family: var(--f-display); font-weight: 900; font-size: 16px; }
+  .dim-line .name small { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.16em; color: var(--ink-4); margin-left: 8px; font-weight: 500; text-transform: uppercase; }
+  .dim-line .val { font-family: var(--f-mono); font-weight: 700; font-size: 18px; }
+  .dim-line .val.low { color: var(--vermilion); }
+  .dim-line .note { margin-top: 9px; font-size: 13px; color: var(--ink-3); line-height: 1.8; }
+
+  /* 分类得分条 */
+  .cat-row { display: grid; grid-template-columns: 150px 1fr 66px 52px; gap: 16px; align-items: center; padding: 13px 4px; border-bottom: 1px solid var(--line); }
+  .cat-row .c { font-size: 13.5px; color: var(--ink-2); }
+  .cat-row .track { height: 8px; background: var(--line-soft); position: relative; }
+  .cat-row .track i { position: absolute; inset: 0 auto 0 0; background: var(--ink); }
+  .cat-row .track i.top { background: var(--vermilion); }
+  .cat-row .v { font-family: var(--f-mono); font-weight: 700; font-size: 14px; text-align: right; }
+  .cat-row .n { font-family: var(--f-mono); font-size: 11px; color: var(--ink-4); text-align: right; }
+
+  /* 强弱项 */
+  .sw { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--line); background: var(--sheet); }
+  .sw-col { padding: 24px 26px; }
+  .sw-col + .sw-col { border-left: 1px solid var(--line); }
+  .sw-title { display: flex; align-items: center; gap: 9px; font-family: var(--f-mono); font-size: 11px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 16px; }
+  .sw-title.good { color: var(--pine); }
+  .sw-title.bad { color: var(--vermilion); }
+  .sw li { position: relative; padding: 9px 0 9px 20px; font-size: 13.5px; color: var(--ink-2); line-height: 1.75; border-bottom: 1px dashed var(--line); }
+  .sw li:last-child { border-bottom: 0; }
+  .sw li::before { content: ''; position: absolute; left: 0; top: 17px; width: 8px; height: 1px; background: var(--ink-4); }
+  .sw-col.good li::before { background: var(--pine); }
+  .sw-col.bad li::before { background: var(--vermilion); }
+
+  /* 学习建议 */
+  .advice-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+  .advice { border: 1px solid var(--line); background: var(--sheet); }
+  .advice-item { display: grid; grid-template-columns: 46px 1fr auto; gap: 18px; padding: 20px 22px; border-bottom: 1px solid var(--line); align-items: start; }
+  .advice-item:last-child { border-bottom: 0; }
+  .advice-item .no { font-family: var(--f-mono); font-weight: 700; font-size: 15px; color: var(--vermilion); padding-top: 2px; }
+  .advice-item h4 { font-size: 15.5px; margin-bottom: 6px; }
+  .advice-item p { font-size: 13.5px; color: var(--ink-2); line-height: 1.85; }
+  .advice-item .side { text-align: right; }
+  .advice-item .score { font-family: var(--f-mono); font-weight: 700; font-size: 15px; }
+  .advice-item .cat { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4); margin-top: 4px; }
+
+  /* 覆盖情况 */
+  .coverage { border: 1px dashed var(--line-strong); background: var(--sheet-2); padding: 18px 22px; margin-bottom: 18px; }
+  .coverage h5 { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .coverage li { display: flex; gap: 10px; font-size: 13px; padding: 6px 0; color: var(--ink-2); align-items: flex-start; }
+  .coverage .ic.ok { color: var(--pine); }
+  .coverage .ic.warn { color: var(--ochre); }
+  .coverage a { color: var(--ink); border-bottom: 1px solid var(--line-strong); }
+  .coverage a:hover { color: var(--vermilion); border-color: var(--vermilion); }
+
+  /* 好差答案 */
+  .compare { border: 1px solid var(--line); background: var(--sheet); padding: 22px 24px; margin-bottom: 18px; }
+  .compare .q { font-size: 14px; color: var(--ink-2); margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .compare .q b { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.14em; color: var(--vermilion); margin-right: 8px; }
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .cmp { padding: 16px 18px; border-left: 2px solid; }
+  .cmp.good { border-color: var(--pine); background: var(--pine-wash); }
+  .cmp.bad { border-color: var(--vermilion); background: var(--verm-wash); }
+  .cmp h5 { display: flex; align-items: center; gap: 7px; font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 10px; }
+  .cmp.good h5 { color: var(--pine); }
+  .cmp.bad h5 { color: var(--vermilion); }
+  .cmp li { font-size: 13px; color: var(--ink-2); line-height: 1.8; padding: 3px 0 3px 14px; position: relative; }
+  .cmp li::before { content: '·'; position: absolute; left: 2px; color: var(--ink-4); }
+
+  /* 报告全文 */
+  .doc { border: 1px solid var(--line); background: var(--sheet); padding: clamp(24px, 3.4vw, 46px); }
+  .doc h2 { font-size: 19px; margin: 30px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .doc h2:first-child { margin-top: 0; }
+  .doc h3 { font-size: 15.5px; margin: 20px 0 8px; color: var(--ink-2); }
+  .doc p { font-size: 14px; line-height: 2; color: var(--ink-2); margin-bottom: 10px; }
+  .doc li { font-size: 14px; line-height: 2; color: var(--ink-2); padding-left: 18px; position: relative; }
+  .doc li::before { content: '◇'; position: absolute; left: 0; font-size: 10px; color: var(--vermilion); top: 4px; }
+
+  .actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 46px; }
+
+  @media (max-width: 1080px) {
+    .duo { grid-template-columns: 1fr; }
+    .cover { grid-template-columns: auto 1fr; }
+    .cover-stamp { display: none; }
+  }
+  @media (max-width: 720px) {
+    .cover { grid-template-columns: 1fr; gap: 16px; }
+    .cover-stamp { display: block; position: absolute; top: 22px; right: 20px; }
+    .cover-stamp .stamp { --sz: 70px; font-size: 17px; }
+    .cover-main .role { font-size: 13.5px; line-height: 1.8; }
+    .cover-kv { gap: 18px; }
+    .kpi { grid-template-columns: 1fr 1fr; }
+    .kpi .cell:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
+    .kpi .cell:nth-child(4) { border-top: 1px solid var(--line); }
+    .sw { grid-template-columns: 1fr; }
+    .sw-col + .sw-col { border-left: 0; border-top: 1px solid var(--line); }
+    .compare-grid { grid-template-columns: 1fr; }
+    .cat-row { grid-template-columns: 110px 1fr 60px; }
+    .cat-row .n { display: none; }
+    .advice-item { grid-template-columns: 32px 1fr; }
+    .advice-item .side { grid-column: 2; text-align: left; }
+  }
+</style>
+</head>
+<body data-shell="app" data-page="records">
+
+<div class="shell">
+  <aside class="rail"></aside>
+  <div class="rail-scrim"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:14px">
+        <button class="icon-btn rail-toggle" aria-label="菜单"><span data-ic="menu"></span></button>
+        <div class="crumb"><span>卷·04</span><span class="sep">/</span><b>面试报告</b></div>
+      </div>
+      <div class="topbar-actions">
+        <button class="tlink" data-copy="#reportDoc"><span data-ic="copy"></span>复制报告</button>
+        <a class="btn btn-sm" href="choose-job.html">再来一次<span class="ar" data-ic="arrowRight"></span></a>
+      </div>
+    </div>
+
+    <div class="page-body narrow" style="max-width:1080px">
+
+      <!-- ══ 封面 ══ -->
+      <div class="cover rv">
+        <div class="cover-score">
+          <span class="cap">Avg. Score</span>
+          <span class="big">8.4</span>
+          <span class="of">/ 10</span>
+        </div>
+        <div class="cover-main">
+          <h1>面试总结报告</h1>
+          <div class="role">大模型应用开发工程师 · Intermediate · 面试官：技术深挖型</div>
+          <div class="cover-kv">
+            <div><span class="k">Report №</span><span class="v">20261004-01</span></div>
+            <div><span class="k">日期</span><span class="v">2026-10-04</span></div>
+            <div><span class="k">题量</span><span class="v">8</span></div>
+            <div><span class="k">用时</span><span class="v">13:41</span></div>
+          </div>
+        </div>
+        <div class="cover-stamp"><span class="stamp stamp-lg">已评估</span></div>
+      </div>
+
+      <div class="kpi">
+        <div class="cell"><div class="n">8</div><div class="l">回答题数</div></div>
+        <div class="cell"><div class="n">8</div><div class="l">总题数</div></div>
+        <div class="cell"><div class="n">8.4</div><div class="l">平均分</div></div>
+        <div class="cell"><div class="n">13:41</div><div class="l">用时</div></div>
+      </div>
+
+      <!-- ══ §1 能力雷达 ══ -->
+      <section class="chapter">
+        <div class="chapter-head rv">
+          <span class="sec">§ 01</span><h2>四维能力雷达</h2>
+          <span class="hint">Accuracy / Completeness / Depth / Clarity</span>
+        </div>
+
+        <div class="duo">
+          <div class="sheet radar-box rv" data-d="0.05s">
+            <svg viewBox="0 0 340 300" aria-hidden="true">
+              <!-- 网格 -->
+              <g fill="none" stroke="rgba(23,21,15,.16)">
+                <path d="M170 40 L300 150 L170 260 L40 150 Z"/>
+                <path d="M170 70 L270 150 L170 230 L70 150 Z"/>
+                <path d="M170 100 L240 150 L170 200 L100 150 Z"/>
+                <path d="M170 130 L210 150 L170 170 L130 150 Z"/>
+              </g>
+              <g stroke="rgba(23,21,15,.14)"><path d="M170 40v220M40 150h260"/></g>
+              <!-- 数据多边形 -->
+              <path d="M170 45 L289 150 L170 248 L44 150 Z" fill="none" stroke="rgba(23,21,15,.28)"/>
+              <path d="M170 46.4 L283.7 150 L170 243.2 L44.6 150 Z" fill="rgba(217,58,31,.13)" stroke="#D93A1F" stroke-width="1.6"/>
+              <g fill="#D93A1F">
+                <circle cx="170" cy="46.4" r="3.4"/><circle cx="283.7" cy="150" r="3.4"/>
+                <circle cx="170" cy="243.2" r="3.4"/><circle cx="44.6" cy="150" r="3.4"/>
+              </g>
+              <g class="radar-axis">
+                <text x="170" y="26" text-anchor="middle">准确 ACCURACY</text>
+                <text x="330" y="154" text-anchor="end">完整</text>
+                <text x="170" y="284" text-anchor="middle">深度 DEPTH</text>
+                <text x="10" y="154">条理</text>
+              </g>
+              <g class="radar-val">
+                <text x="170" y="60" text-anchor="middle">8.6</text>
+                <text x="308" y="164" text-anchor="end">6.8</text>
+                <text x="170" y="230" text-anchor="middle">6.2</text>
+                <text x="34" y="164">9.1</text>
+              </g>
+            </svg>
+          </div>
+
+          <div class="rv" data-d="0.12s">
+            <div class="dims" data-meter>
+              <div class="dim-line">
+                <div class="top"><span class="name">准确<small>Accuracy</small></span><span class="val">8.6</span></div>
+                <div class="progress"><div class="progress-fill" data-w="86" style="width:0"></div></div>
+                <div class="note">概念表述准确，未出现幻觉；对 RRF 融合与父文档检索的描述与实现一致。</div>
+              </div>
+              <div class="dim-line">
+                <div class="top"><span class="name">完整<small>Completeness</small></span><span class="val low">6.8</span></div>
+                <div class="progress"><div class="progress-fill" data-w="68" style="width:0"></div></div>
+                <div class="note">检索链路答得完整，但评估方案只提到指标名称，缺少评测集构造方法。</div>
+              </div>
+              <div class="dim-line">
+                <div class="top"><span class="name">深度<small>Depth</small></span><span class="val low">6.2</span></div>
+                <div class="progress"><div class="progress-fill" data-w="62" style="width:0"></div></div>
+                <div class="note">重排的必要性解释偏笼统，未给出排序质量对比与具体模型选型理由。</div>
+              </div>
+              <div class="dim-line">
+                <div class="top"><span class="name">条理<small>Clarity</small></span><span class="val">9.1</span></div>
+                <div class="progress"><div class="progress-fill" data-w="91" style="width:0"></div></div>
+                <div class="note">回答先给结论再分点展开，结构清晰，是本场得分最高的一项。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ §2 分类得分 ══ -->
+      <section class="chapter">
+        <div class="chapter-head rv">
+          <span class="sec">§ 02</span><h2>分类得分</h2>
+          <span class="hint">按题目类别聚合</span>
+        </div>
+        <div class="rv" data-meter>
+          <div class="cat-row"><span class="c">RAG 检索增强</span><span class="track"><i class="top" data-w="88" style="width:0"></i></span><span class="v">8.8</span><span class="n">3 题</span></div>
+          <div class="cat-row"><span class="c">提示词工程</span><span class="track"><i data-w="85" style="width:0"></i></span><span class="v">8.5</span><span class="n">1 题</span></div>
+          <div class="cat-row"><span class="c">Agent 与工具调用</span><span class="track"><i data-w="79" style="width:0"></i></span><span class="v">7.9</span><span class="n">2 题</span></div>
+          <div class="cat-row"><span class="c">工程与部署</span><span class="track"><i data-w="72" style="width:0"></i></span><span class="v">7.2</span><span class="n">1 题</span></div>
+          <div class="cat-row"><span class="c">项目复盘</span><span class="track"><i data-w="83" style="width:0"></i></span><span class="v">8.3</span><span class="n">1 题</span></div>
+        </div>
+      </section>
+
+      <!-- ══ §3 强弱项 ══ -->
+      <section class="chapter">
+        <div class="chapter-head rv">
+          <span class="sec">§ 03</span><h2>优势与待加强</h2>
+        </div>
+        <div class="sw rv">
+          <div class="sw-col good">
+            <div class="sw-title"><span data-ic="thumbsUp"></span>优势项</div>
+            <ul>
+              <li>表达结构好：回答自带「结论 → 分点 → 收束」，面试官不需要追问结构。</li>
+              <li>工程细节可信：讲到父文档检索、RRF 参数等实现层细节，与项目描述互相印证。</li>
+              <li>诚实处理不会的点：对不确定的实现没有编造，而是说明思路边界。</li>
+            </ul>
+          </div>
+          <div class="sw-col bad">
+            <div class="sw-title"><span data-ic="thumbsDown"></span>待加强</div>
+            <ul>
+              <li>评估体系薄弱：只提了指标名，缺少评测集构造与人工标注流程。</li>
+              <li>重排价值表述笼统：没有量化「重排前后命中率」的对比。</li>
+              <li>部署话题偏浅：未涉及并发、缓存与成本控制等生产问题。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ §4 学习建议 ══ -->
+      <section class="chapter">
+        <div class="chapter-head rv">
+          <span class="sec">§ 04</span><h2>学习建议</h2>
+          <span class="hint">可一键存入知识库</span>
+        </div>
+
+        <div class="advice-toolbar rv">
+          <button class="btn btn-sm" id="importBtn"><span data-ic="download"></span>一键存入知识库</button>
+          <span class="mono" id="importState">尚未入库 · 共 3 条建议</span>
+        </div>
+
+        <!-- 入库后：覆盖情况 -->
+        <div class="coverage rv" id="coverage" hidden>
+          <h5><span data-ic="target"></span>知识库覆盖情况</h5>
+          <ul>
+            <li><span class="ic ok" data-ic="checkCircle"></span><span>RAG 评估指标：已有 2 条相关笔记 <a href="note.html">「RAG 评估指标与评测集」</a>、<a href="note.html">「Faithfulness 与 Context Recall」</a></span></li>
+            <li><span class="ic warn" data-ic="alert"></span><span>重排模型选型：知识库中无相关内容，<a href="workspace.html">建议导入对应资料 →</a></span></li>
+            <li><span class="ic ok" data-ic="checkCircle"></span><span>向量检索深度：已有 1 条相关笔记 <a href="note.html">「BM25 + 向量混合检索」</a></span></li>
+          </ul>
+        </div>
+
+        <div class="advice rv">
+          <div class="advice-item">
+            <span class="no">01</span>
+            <div>
+              <h4>RAG 评估指标与评测集构造</h4>
+              <p>补齐 Faithfulness / Answer Relevancy / Context Recall 三类指标的定义与计算方式，并动手用 50 条「问题–标准答案–支撑段落」构造一个最小评测集。</p>
+            </div>
+            <div class="side"><div class="score">6.2</div><div class="cat">评估体系</div></div>
+          </div>
+          <div class="advice-item">
+            <span class="no">02</span>
+            <div>
+              <h4>重排（Rerank）的作用与选型</h4>
+              <p>用同一批 query 对比「只用向量召回」与「召回 + 交叉编码器重排」的 Top3 命中率，形成一组可量化的结论，再对比 bge-reranker 与 Cohere Rerank 的取舍。</p>
+            </div>
+            <div class="side"><div class="score">6.8</div><div class="cat">检索优化</div></div>
+          </div>
+          <div class="advice-item">
+            <span class="no">03</span>
+            <div>
+              <h4>生产部署：并发、缓存与成本</h4>
+              <p>整理一张部署清单：模型服务的并发与限流、检索结果缓存、embedding 批处理与 token 成本估算。</p>
+            </div>
+            <div class="side"><div class="score">7.2</div><div class="cat">工程实践</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ §5 好差答案 ══ -->
+      <section class="chapter">
+        <div class="chapter-head rv">
+          <span class="sec">§ 05</span><h2>好答案 vs 差答案</h2>
+          <span class="hint">按题对照</span>
+        </div>
+
+        <div class="compare rv">
+          <div class="q"><b>Q2</b>请说说你的 RAG 项目里，从文档到召回的完整链路是怎样的？为什么要引入重排？</div>
+          <div class="compare-grid">
+            <div class="cmp good">
+              <h5><span data-ic="thumbsUp"></span>高分答案特征</h5>
+              <ul>
+                <li>按「分块 → 召回 → 融合 → 重排 → 生成」分段作答</li>
+                <li>说明父文档策略：子块索引、父块返回</li>
+                <li>给出重排前后的 Top3 命中率对比数据</li>
+                <li>提到交叉编码器与双塔模型的成本差异</li>
+              </ul>
+            </div>
+            <div class="cmp bad">
+              <h5><span data-ic="thumbsDown"></span>低分踩坑特征</h5>
+              <ul>
+                <li>只说「用了向量数据库和重排模型」</li>
+                <li>把重排与召回混为一谈</li>
+                <li>无法解释为什么需要第二次排序</li>
+                <li>举不出任何量化或场景化的例子</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="compare rv">
+          <div class="q"><b>Q3</b>你们怎么判断 RAG 的回答有没有幻觉？如何设计评估方案？</div>
+          <div class="compare-grid">
+            <div class="cmp good">
+              <h5><span data-ic="thumbsUp"></span>高分答案特征</h5>
+              <ul>
+                <li>区分检索质量与生成质量两类指标</li>
+                <li>说明评测集来源：真实 query + 人工标注</li>
+                <li>提到用 LLM-as-Judge 时需要人工抽检校准</li>
+                <li>给出上线后的线上监控口径</li>
+              </ul>
+            </div>
+            <div class="cmp bad">
+              <h5><span data-ic="thumbsDown"></span>低分踩坑特征</h5>
+              <ul>
+                <li>只回答「看回答准不准」</li>
+                <li>把幻觉与检索失败混为一类问题</li>
+                <li>没有提到任何可执行的评测流程</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ §6 报告全文 ══ -->
+      <section class="chapter">
+        <div class="chapter-head rv">
+          <span class="sec">§ 06</span><h2>报告全文</h2>
+          <span class="hint">Markdown · 可复制</span>
+        </div>
+        <div class="doc rv" id="reportDoc">
+          <h2>整体评价</h2>
+          <p>本场面试整体表现稳定，平均 8.4 分。候选人具备真实的 RAG 工程落地经验，回答中能给出实现细节且与技术描述相互印证；主要短板集中在评估体系与生产部署两个方向。</p>
+          <h2>逐题点评</h2>
+          <h3>Q1 自我介绍</h3>
+          <p>结构清晰，用一句话交代方向后迅速落到项目本身，比泛泛而谈的自我介绍更能抓住面试官注意力。建议补充一条量化结果。</p>
+          <h3>Q2 检索链路</h3>
+          <p>五段式作答完整，父文档策略是加分项。重排部分的解释停留在「效果更好」，缺少对比数据支撑。</p>
+          <h3>Q3 评估与幻觉</h3>
+          <p>能区分检索与生成两类问题，但对评测集的构造只有方向没有方法，是本题失分的主因。</p>
+          <h2>下一步行动</h2>
+          <ul>
+            <li>三天内完成一个 50 条规模的最小 RAG 评测集</li>
+            <li>用同一批 query 做一次重排前后命中率对比实验</li>
+            <li>整理部署清单，补齐并发与成本口径</li>
+          </ul>
+        </div>
+      </section>
+
+      <div class="actions">
+        <a class="btn" href="choose-job.html">再来一次面试<span class="ar" data-ic="arrowRight"></span></a>
+        <button class="btn btn-ghost" data-copy="#reportDoc">复制报告全文</button>
+        <a class="tlink" href="records.html" style="align-self:center">查看逐题记录<span data-ic="arrowRight"></span></a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/app.js"></script>
+<script>
+  /* 一键入库：演示状态流转 */
+  const importBtn = document.getElementById('importBtn');
+  const coverage = document.getElementById('coverage');
+  const state = document.getElementById('importState');
+  importBtn.addEventListener('click', () => {
+    importBtn.classList.add('is-disabled');
+    importBtn.innerHTML = '<span data-ic="refresh"></span>入库中…';
+    window.renderIcons(importBtn);
+    setTimeout(() => {
+      coverage.hidden = false;
+      importBtn.innerHTML = '<span data-ic="check"></span>已入库 3 条';
+      importBtn.classList.remove('is-disabled');
+      importBtn.classList.add('btn-ghost');
+      importBtn.style.pointerEvents = 'none';
+      window.renderIcons(importBtn);
+      state.textContent = '已存入知识库 3 条 · 1 条覆盖不足';
+      toast('已存入知识库 3 条，详见覆盖情况');
+    }, 900);
+  });
+</script>
+</body>
+</html>

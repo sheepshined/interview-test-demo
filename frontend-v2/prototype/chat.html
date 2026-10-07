@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI 对话 · AI 模拟面试官</title>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="assets/css/tokens.css">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/components.css">
+<style>
+  .chat-layout { display: grid; grid-template-columns: 286px 1fr; gap: 24px; align-items: stretch; min-height: calc(100vh - 150px); }
+
+  /* ── 会话列表 ── */
+  .sessions { border: 1px solid var(--line); background: var(--sheet); display: flex; flex-direction: column; }
+  .sessions-head { padding: 16px; border-bottom: 1px solid var(--line-strong); }
+  .sessions-head .t { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 12px; display: block; }
+  .sess-list { flex: 1; overflow-y: auto; }
+  .sess {
+    position: relative; width: 100%; text-align: left; cursor: pointer;
+    padding: 14px 16px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+    transition: background var(--dur-1) ease, padding-left var(--dur-2) var(--ease);
+  }
+  .sess:hover { background: var(--sheet-2); padding-left: 20px; }
+  .sess.is-on { background: var(--sheet-2); }
+  .sess.is-on::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--vermilion); }
+  .sess .body { min-width: 0; flex: 1; }
+  .sess .t { font-size: 13.5px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sess .d { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); margin-top: 3px; letter-spacing: 0.06em; }
+  .sess .del { opacity: 0; color: var(--ink-4); transition: all var(--dur-1) ease; flex-shrink: 0; }
+  .sess:hover .del { opacity: 1; }
+  .sess .del:hover { color: var(--vermilion); }
+
+  /* ── 聊天区 ── */
+  .chat { border: 1px solid var(--line); background: var(--sheet); display: flex; flex-direction: column; min-width: 0; }
+  .chat-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    padding: 16px 26px; border-bottom: 1px solid var(--line-strong);
+  }
+  .chat-head .title { font-family: var(--f-display); font-weight: 900; font-size: 16px; }
+  .chat-head .sub { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4); margin-top: 3px; }
+  .chat-body { flex: 1; overflow-y: auto; padding: 30px clamp(20px, 3vw, 44px); }
+
+  .turn { margin-bottom: 34px; }
+  .turn-user { display: flex; justify-content: flex-end; }
+  .turn-user .bubble {
+    max-width: 76%; padding: 14px 18px;
+    background: var(--ink); color: var(--paper);
+    font-size: 14px; line-height: 1.85;
+  }
+  .turn-user .who { font-family: var(--f-mono); font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(240,234,216,.5); margin-bottom: 6px; }
+
+  .turn-ai .who-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .turn-ai .who { font-family: var(--f-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--vermilion); }
+  .turn-ai .who::after { content: ''; display: inline-block; width: 22px; height: 1px; background: var(--verm-line); margin-left: 10px; vertical-align: middle; }
+  .turn-ai .time { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); }
+  .turn-ai .answer { padding-left: 18px; border-left: 2px solid var(--line-strong); }
+  .turn-ai .answer p { font-size: 14.5px; line-height: 2.05; color: var(--ink-2); margin-bottom: 10px; }
+  .turn-ai .answer p:last-child { margin-bottom: 0; }
+  .turn-ai .answer strong { color: var(--ink); font-weight: 700; }
+  .turn-ai .answer ul { margin: 8px 0 12px; }
+  .turn-ai .answer li { font-size: 14px; line-height: 1.95; color: var(--ink-2); padding-left: 18px; position: relative; }
+  .turn-ai .answer li::before { content: '·'; position: absolute; left: 5px; color: var(--vermilion); }
+  .cite {
+    font-family: var(--f-mono); font-size: 10.5px; font-weight: 700;
+    color: var(--vermilion); vertical-align: super;
+    border: 1px solid var(--verm-line); padding: 0 4px; margin-left: 2px; cursor: pointer;
+    transition: all var(--dur-1) ease;
+  }
+  .cite:hover { background: var(--vermilion); color: var(--sheet); }
+
+  .sources { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line); }
+  .sources .st { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .source-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+  .source-row .no { font-family: var(--f-mono); font-size: 10.5px; font-weight: 700; color: var(--vermilion); width: 18px; }
+  .source-row .name { font-size: 13px; color: var(--ink); border-bottom: 1px solid var(--line-strong); transition: all var(--dur-1) ease; }
+  .source-row .name:hover { color: var(--vermilion); border-color: var(--vermilion); }
+  .source-row .bar { flex: 1; height: 3px; background: var(--line-soft); position: relative; min-width: 40px; }
+  .source-row .bar i { position: absolute; inset: 0 auto 0 0; background: var(--ink); }
+  .source-row .pct { font-family: var(--f-mono); font-size: 10.5px; font-weight: 700; color: var(--ink-2); width: 36px; text-align: right; }
+
+  .sparse {
+    margin-top: 14px; display: flex; align-items: center; gap: 9px;
+    padding: 10px 14px; border: 1px dashed var(--ochre); background: var(--ochre-wash);
+    font-size: 12.5px; color: #7A5410;
+  }
+  .sparse a { font-weight: 600; color: var(--ochre); border-bottom: 1px solid currentColor; margin-left: auto; white-space: nowrap; }
+
+  .thinking { display: inline-flex; gap: 5px; align-items: center; padding-left: 18px; }
+  .thinking i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); animation: pulse 1.2s ease-in-out infinite; }
+  .thinking i:nth-child(2) { animation-delay: .18s; }
+  .thinking i:nth-child(3) { animation-delay: .36s; }
+
+  /* 空态建议 */
+  .suggests { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+  .suggest {
+    text-align: left; padding: 12px 16px; max-width: 280px;
+    border: 1px solid var(--line); background: var(--sheet-2);
+    font-size: 13px; color: var(--ink-2); line-height: 1.7;
+    transition: all var(--dur-2) var(--ease);
+  }
+  .suggest:hover { border-color: var(--ink); transform: translateY(-2px); }
+
+  /* 输入台 */
+  .composer { border-top: 1px solid var(--line-strong); padding: 16px clamp(20px, 3vw, 44px) 18px; background: var(--sheet-2); }
+  .composer .box {
+    display: flex; align-items: flex-end; gap: 12px;
+    border: 1px solid var(--line-strong); background: var(--sheet); padding: 12px 14px;
+    transition: border-color var(--dur-2) ease, box-shadow var(--dur-2) ease;
+  }
+  .composer .box:focus-within { border-color: var(--ink); box-shadow: 0 0 0 3px var(--line-soft); }
+  .composer textarea { flex: 1; border: 0; outline: none; background: none; resize: none; font-size: 14.5px; line-height: 1.8; min-height: 46px; max-height: 140px; }
+  .composer textarea::placeholder { color: var(--ink-4); }
+  .send {
+    width: 42px; height: 42px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--ink); color: var(--paper);
+    transition: all var(--dur-2) var(--ease);
+  }
+  .send:hover { background: var(--vermilion); transform: translateY(-2px); }
+  .composer .foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; }
+  .composer .foot span { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4); }
+
+  @media (max-width: 1080px) { .chat-layout { grid-template-columns: 1fr; } .sessions { max-height: 260px; } }
+</style>
+</head>
+<body data-shell="app" data-page="chat">
+
+<div class="shell">
+  <aside class="rail"></aside>
+  <div class="rail-scrim"></div>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:14px">
+        <button class="icon-btn rail-toggle" aria-label="菜单"><span data-ic="menu"></span></button>
+        <div class="crumb"><span>卷·07</span><span class="sep">/</span><b>AI 对话</b></div>
+      </div>
+      <div class="topbar-actions">
+        <span class="mono">基于你的知识库回答 · 附来源</span>
+      </div>
+    </div>
+
+    <div class="page-body">
+      <div class="chat-layout">
+
+        <!-- 会话列表 -->
+        <aside class="sessions rv">
+          <div class="sessions-head">
+            <span class="t">Conversations · 4</span>
+            <button class="btn btn-sm btn-block" onclick="newChat()"><span data-ic="plus"></span>新对话</button>
+          </div>
+          <div class="sess-list">
+            <button class="sess is-on">
+              <span class="body">
+                <span class="t">注意力机制辨析</span>
+                <span class="d">刚刚 · 4 条消息</span>
+              </span>
+              <span class="del" title="删除"><span data-ic="trash"></span></span>
+            </button>
+            <button class="sess">
+              <span class="body">
+                <span class="t">RAG 评测集怎么建</span>
+                <span class="d">2 小时前 · 8 条消息</span>
+              </span>
+              <span class="del" title="删除"><span data-ic="trash"></span></span>
+            </button>
+            <button class="sess">
+              <span class="body">
+                <span class="t">LangGraph 中断恢复</span>
+                <span class="d">昨天 · 6 条消息</span>
+              </span>
+              <span class="del" title="删除"><span data-ic="trash"></span></span>
+            </button>
+            <button class="sess">
+              <span class="body">
+                <span class="t">部署成本怎么估</span>
+                <span class="d">09-25 · 3 条消息</span>
+              </span>
+              <span class="del" title="删除"><span data-ic="trash"></span></span>
+            </button>
+          </div>
+        </aside>
+
+        <!-- 聊天区 -->
+        <section class="chat rv" data-d="0.06s">
+          <div class="chat-head">
+            <div>
+              <div class="title">注意力机制辨析</div>
+              <div class="sub">检索 12 篇笔记 · 命中 3 条来源</div>
+            </div>
+            <button class="icon-btn" title="重命名" onclick="toast('演示：可重命名当前对话','edit')"><span data-ic="edit"></span></button>
+          </div>
+
+          <div class="chat-body" id="chatBody">
+
+            <div class="turn turn-user">
+              <div class="bubble">
+                <div class="who">我</div>
+                注意力机制和 self-attention 有什么区别？面试里被问到了，我想答得更严谨一点。
+              </div>
+            </div>
+
+            <div class="turn turn-ai">
+              <div class="who-row"><span class="who">知识库助手</span><span class="time">刚刚</span></div>
+              <div class="answer">
+                <p><strong>一句话结论：</strong>注意力机制是通用框架，self-attention 是其中「Q、K、V 同源」的特例<span class="cite">1</span>。</p>
+                <p>注意力机制的通用形式是：用查询（Query）与一组键值对（Key–Value）计算权重并加权求和。根据 Q 的来源不同，可以有多种变体：</p>
+                <ul>
+                  <li><strong>Self-Attention：</strong>Q、K、V 都来自同一个序列，建模序列内部依赖<span class="cite">2</span></li>
+                  <li><strong>Cross-Attention：</strong>Q 来自解码端，K、V 来自编码端，用于对齐两个序列</li>
+                  <li>你笔记里还提到多头机制：把表示拆到多个子空间并行做注意力<span class="cite">3</span></li>
+                </ul>
+                <p>面试表达建议：先给「框架 vs 特例」的界定，再补一句 Q/K/V 同源这个判据，最后举例说明两者各自的使用场景。</p>
+
+                <div class="sources">
+                  <div class="st"><span data-ic="book"></span>参考来源 · 3</div>
+                  <a class="source-row" href="note.html">
+                    <span class="no">1</span><span class="name">Transformer 架构笔记</span>
+                    <span class="bar"><i style="width:88%"></i></span><span class="pct">88%</span>
+                  </a>
+                  <a class="source-row" href="note.html">
+                    <span class="no">2</span><span class="name">注意力机制</span>
+                    <span class="bar"><i style="width:84%"></i></span><span class="pct">84%</span>
+                  </a>
+                  <a class="source-row" href="note.html">
+                    <span class="no">3</span><span class="name">位置编码</span>
+                    <span class="bar"><i style="width:61%"></i></span><span class="pct">61%</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="turn turn-user">
+              <div class="bubble">
+                <div class="who">我</div>
+                那多头注意力为什么要先把维度降下来再拼回去？
+              </div>
+            </div>
+
+            <div class="turn turn-ai" id="lastTurn">
+              <div class="who-row"><span class="who">知识库助手</span><span class="time">刚刚</span></div>
+              <div class="answer">
+                <p>因为总计算量与单头保持一致：把 <strong>d_model</strong> 平均分给 h 个头（每个头 d_model / h），每个头在低维子空间里独立计算注意力，最后拼接再投影回 d_model。</p>
+                <p>这样既让不同头关注不同模式，又不会让计算量随头数线性膨胀。</p>
+                <div class="sources">
+                  <div class="st"><span data-ic="book"></span>参考来源 · 1</div>
+                  <a class="source-row" href="note.html">
+                    <span class="no">1</span><span class="name">Transformer 架构笔记</span>
+                    <span class="bar"><i style="width:79%"></i></span><span class="pct">79%</span>
+                  </a>
+                </div>
+                <div class="sparse">
+                  <span data-ic="alert"></span>
+                  <span>相关度不算高，可能需要补充更多资料</span>
+                  <a href="workspace.html">去导入 →</a>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="composer">
+            <div class="box">
+              <textarea id="q" rows="1" placeholder="输入你的问题，比如：注意力机制和 self-attention 有什么区别？"></textarea>
+              <button class="send" id="sendBtn" title="发送"><span data-ic="arrowRight" style="color:#fff"></span></button>
+            </div>
+            <div class="foot">
+              <span>Enter 发送 · 回答仅基于你的知识库</span>
+              <span id="mode">检索 12 篇 · Top 5</span>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/app.js"></script>
+<script>
+  const ta = document.getElementById('q');
+  ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; });
+  ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  document.getElementById('sendBtn').addEventListener('click', send);
+
+  function send() {
+    const v = ta.value.trim();
+    if (!v) { toast('先输入一个问题', 'alert'); return; }
+    const body = document.getElementById('chatBody');
+    const u = document.createElement('div');
+    u.className = 'turn turn-user';
+    u.innerHTML = `<div class="bubble"><div class="who">我</div>${v.replace(/[<>]/g, '')}</div>`;
+    body.appendChild(u);
+    ta.value = ''; ta.style.height = 'auto';
+
+    const think = document.createElement('div');
+    think.className = 'turn turn-ai';
+    think.innerHTML = `<div class="who-row"><span class="who">知识库助手</span><span class="time">刚刚</span></div>
+      <div class="thinking"><i></i><i></i><i></i></div>`;
+    body.appendChild(think);
+    body.scrollTop = 1e5;
+    setTimeout(() => {
+      think.innerHTML = `<div class="who-row"><span class="who">知识库助手</span><span class="time">刚刚</span></div>
+        <div class="answer"><p>（原型演示）这里将展示基于知识库检索的流式回答，并在下方列出参考来源与相似度。</p>
+        <div class="sources"><div class="st"><span data-ic="book"></span>参考来源 · 2</div>
+          <a class="source-row" href="note.html"><span class="no">1</span><span class="name">RAG 评估指标与评测集</span><span class="bar"><i style="width:81%"></i></span><span class="pct">81%</span></a>
+          <a class="source-row" href="note.html"><span class="no">2</span><span class="name">BM25 + 向量混合检索</span><span class="bar"><i style="width:74%"></i></span><span class="pct">74%</span></a>
+        </div></div>`;
+      body.scrollTop = 1e5;
+    }, 1200);
+  }
+
+  function newChat() {
+    document.querySelectorAll('.sess').forEach((s) => s.classList.remove('is-on'));
+    toast('已新建对话');
+  }
+  document.querySelectorAll('.sess').forEach((s) => s.addEventListener('click', (e) => {
+    if (e.target.closest('.del')) { e.stopPropagation(); toast('已删除该对话'); return; }
+    document.querySelectorAll('.sess').forEach((x) => x.classList.toggle('is-on', x === s));
+  }));
+</script>
+</body>
+</html>

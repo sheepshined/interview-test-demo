@@ -109,13 +109,17 @@
         </div>
       </div>
     </div>
+    <div v-if="voiceError" style="background:var(--surface);border-top:1px solid var(--border-default);padding:4px 20px;font-size:12px;color:var(--error);flex-shrink:0;">{{ voiceError }}</div>
     <div v-if="!ended" style="background:var(--surface);border-top:1px solid var(--border-default);padding:12px 20px;display:flex;gap:10px;flex-shrink:0;align-items:flex-end;">
       <textarea ref="inputRef" v-model="userInput" class="ds-input iv-answer-input" rows="1"
-                :placeholder="inputBusy?'AI 正在处理…':(listening?'正在聆听，请说话…':'输入你的回答，Enter 发送 / Shift+Enter 换行…')"
+                :placeholder="inputBusy?'AI 正在处理…':(voiceProcessing?'识别中…':(listening?'正在聆听，请说话…':'输入你的回答，Enter 发送 / Shift+Enter 换行…'))"
                 spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"
                 @keydown="handleInputKeydown" :disabled="inputBusy"></textarea>
-      <button v-if="voiceSupported" class="ds-btn iv-voice-btn" :class="{ listening }" @click="toggleVoice" :disabled="inputBusy" :title="listening?'停止语音输入':'语音输入'">
-        <DSIcon :name="listening ? 'square' : 'mic'" :size="15" />
+      <button v-if="voiceSupported" class="ds-btn iv-voice-btn" :class="{ listening }" @click="toggleVoice"
+              :disabled="inputBusy || voiceProcessing"
+              :title="voiceProcessing ? '识别中…' : (listening ? `停止语音输入 (${voiceElapsed}s)` : '语音输入')">
+        <span v-if="voiceProcessing" class="loading-spinner" style="width:14px;height:14px;border-width:2px;"></span>
+        <DSIcon v-else :name="listening ? 'square' : 'mic'" :size="15" />
       </button>
       <button class="ds-btn iv-hint-btn" @click="sendHint" :disabled="inputBusy||hintCount>=2" :title="hintCount>=2?'每题最多2次提示':`获取提示 (${hintCount}/2)`">
         <DSIcon name="lightbulb" :size="15" />{{ hintCount > 0 ? ` ${hintCount}` : '' }}
@@ -148,6 +152,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWebSocket } from '../composables/useWebSocket'
+import { useVoiceInput } from '../composables/useVoiceInput'
 import { listInterviewRecords, getInterviewRecord, deleteInterviewRecord } from '../api'
 import DSIcon from '../components/DSIcon.vue'
 const router = useRouter()
@@ -187,47 +192,34 @@ function handleInputKeydown(e) {
 }
 watch(userInput, () => nextTick(autoResizeInput))
 
-// ---- 语音输入 (Web Speech API, 仅 Chrome/Edge 支持, 不支持则隐藏按钮) ----
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-const voiceSupported = !!SpeechRecognition
-const listening = ref(false)
-let recognizer = null
-let voiceBaseText = ''   // 开始识别前输入框已有的文字, 识别结果拼接在其后
+// ---- 语音输入 (v1.1): 本地 SenseVoice 识别 (后端 /api/asr), 任意浏览器可用、完全离线 ----
+// 点击开始 → 再次点击结束 (面试回答较长, 避免按住说话); 结果拼接在开始前输入内容之后
+const voiceBaseText = ref('')
+const {
+  supported: voiceSupported,
+  recording: listening,
+  processing: voiceProcessing,
+  error: voiceError,
+  elapsed: voiceElapsed,
+  start: startVoice,
+  stop: stopVoice,
+} = useVoiceInput({
+  onResult(text) {
+    userInput.value = (voiceBaseText.value + ' ' + text).trim()
+    nextTick(() => { autoResizeInput(); inputRef.value && inputRef.value.focus() })
+  },
+})
 
-function toggleVoice() {
-  if (!voiceSupported) return
+async function toggleVoice() {
   if (listening.value) {
-    try { recognizer && recognizer.stop() } catch (_) {}
+    stopVoice()
     return
   }
   // 开始语音输入时停止 TTS 朗读, 避免麦克风拾取 AI 声音产生回声
   stopTts()
-  recognizer = new SpeechRecognition()
-  recognizer.lang = 'zh-CN'
-  recognizer.continuous = true
-  recognizer.interimResults = true
-  voiceBaseText = userInput.value
-  let finalText = ''
-  recognizer.onresult = (event) => {
-    let interim = ''
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const r = event.results[i]
-      if (r.isFinal) finalText += r[0].transcript
-      else interim += r[0].transcript
-    }
-    // interim 实时显示; final 累积。拼接在识别前的文字之后
-    userInput.value = voiceBaseText + finalText + interim
-  }
-  recognizer.onerror = () => { listening.value = false }
-  recognizer.onend = () => { listening.value = false }
-  try {
-    recognizer.start()
-    listening.value = true
-  } catch (_) {
-    listening.value = false
-  }
+  voiceBaseText.value = userInput.value
+  await startVoice()
 }
-onUnmounted(() => { try { recognizer && recognizer.stop() } catch (_) {} })
 
 const roleTitle = ref('')
 const totalCount = ref(5)

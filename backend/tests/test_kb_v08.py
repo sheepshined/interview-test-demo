@@ -32,9 +32,18 @@ class FakeEmbeddings:
 
 
 @pytest.fixture(autouse=True)
-def fake_embeddings():
-    """全文件统一伪嵌入: 不加载真实 BGE (速度), 且向量维度一致 (Chroma 集合维度锁定)。"""
-    with patch("kb_vectors._embedding_cache", [FakeEmbeddings()]):
+def fake_embeddings(tmp_path):
+    """全文件统一伪嵌入: 不加载真实 BGE (速度), 并隔离独立集合目录。
+
+    独立 KB_PARENT_CHROMA_PATH + 清空模块缓存, 防止 16 维伪向量与
+    其他测试文件的真实 BGE (768 维) 写同一集合导致维度冲突。
+    """
+    fake_dir = str(tmp_path / "kb_parent_fake")
+    with patch("kb_parent._embedding_cache", [FakeEmbeddings()]), \
+            patch("kb_parent._client_cache", []), \
+            patch("kb_parent._collection_cache", []), \
+            patch("kb_parent._store_ready", []), \
+            patch("kb_parent.PARENT_CHROMA_PATH", fake_dir):
         yield
 
 
